@@ -1,0 +1,52 @@
+---
+description: Gaya kode Go untuk proyek ini
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go Code Style
+
+## Penamaan
+
+| Jenis | Konvensi |
+|-------|----------|
+| Package | lowercase, singular feature (`auth`, `product`) |
+| File | snake-ish pendek: `handler.go`, `service.go`, `repository.go`, `model.go` |
+| Exported | PascalCase |
+| JSON tags | camelCase (`json:"refreshToken"`) |
+| DB columns | snake_case via GORM default |
+
+## Pola feature
+
+```go
+type Handler struct { svc *Service }
+func NewHandler(svc *Service) *Handler
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string)
+
+type Service struct { repo Repository; /* deps */ }
+func NewService(...) *Service
+
+type Repository interface { /* methods */ }
+func NewRepository(db *gorm.DB) Repository
+```
+
+## Error handling
+
+- Sentinel errors di `internal/domain`
+- Map di handler dengan `errors.Is`
+- Jangan leak internal error message ke client (pakai `"internal error"`)
+
+## Response
+
+```go
+response.OK(c, "success", data)
+response.Created(c, "product created", data)
+response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+```
+
+## Lainnya
+
+- Manual DI di `cmd/api/main.go` (repo → service → handler)
+- Logging: `log/slog`
+- Config: `internal/config` + `.env` via `godotenv`
+- Jangan import `internal/...` dari package luar module

@@ -1,0 +1,57 @@
+---
+description: Arsitektur umum proyek Golang BE (clean architecture + REST)
+alwaysApply: true
+---
+
+# Golang BE — Overview
+
+RESTful backend dengan **clean architecture**.
+
+## Stack
+
+- **Gin** — HTTP router
+- **GORM** + **PostgreSQL** — persistence
+- **go-redis** — cache
+- **RabbitMQ (amqp091-go)** — async events
+- **JWT** + **apikey** header — auth (pola Wisteria)
+
+## Struktur folder
+
+| Path | Isi |
+|------|-----|
+| `cmd/api` | Entry HTTP API |
+| `cmd/worker` | Consumer RabbitMQ |
+| `internal/<feature>/` | Feature package: `handler.go`, `service.go`, `repository.go`, `model.go` |
+| `internal/domain/` | Entity + sentinel errors |
+| `internal/middleware/` | Auth, API key, logging |
+| `internal/platform/` | Infra adapters (db, redis, rabbitmq) |
+| `internal/config/` | Env config |
+| `pkg/response/` | Envelope JSON response |
+| `docs/` | OpenAPI + Swagger UI |
+
+## Alur request
+
+`Handler → Service → Repository → DB/Cache/MQ`
+
+- Handler: parse/validate HTTP, map error → status
+- Service: business rules, cache, publish event
+- Repository: GORM / data access saja
+
+## Kontrak API (Wisteria-style)
+
+```json
+{ "success": true, "message": "success", "data": {} }
+{ "success": false, "message": "unauthorized" }
+```
+
+- JSON field: **camelCase** (`accessToken`, `userId`, `createdAt`)
+- Prefix route: `/api/v1`
+- Header: `apikey` + `Authorization: Bearer <token>`
+
+## Prinsip
+
+- Feature baru = package di `internal/<feature>/`
+- Jangan taruh business logic di handler
+- Reuse `pkg/response` + `domain` errors
+- Strict diff scope — jangan refactor unrelated
+- Context first — baca file feature sejenis sebelum menambah yang baru

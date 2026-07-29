@@ -1,0 +1,45 @@
+---
+description: Konvensi REST API, auth, cache, dan RabbitMQ
+globs: "internal/**/*.go"
+alwaysApply: false
+---
+
+# API & Infra Conventions
+
+## Auth
+
+- Public: `/authentication/register`, `/login`, `/refresh-token`
+- Protected: middleware `Auth(jwtSecret)`
+- Access vs refresh dibedakan lewat claim `type`
+- Token expired message: `"Unauthorized: Token expired"` (selaras Wisteria interceptor)
+
+## Headers
+
+- `apikey: <API_KEY>` wajib di `/api/v1`
+- `Authorization: Bearer <accessToken>` untuk route protected
+
+## Redis
+
+- Cache read-through di service layer
+- Invalidate list/detail pada create/update/delete
+- Key pattern: `product:{id}`, `products:user:{userId}`
+
+## RabbitMQ
+
+- Publish dari service setelah persist sukses
+- Routing key contoh: `product.created`
+- Worker di `cmd/worker` consume + ack
+- Jika MQ down saat boot API: log warn, lanjut tanpa event (jangan crash API)
+- Publish event boleh async via `go func()` + `context.WithTimeout(context.Background(), ...)`
+  (jangan reuse request context — bisa cancel saat handler return)
+
+## Goroutine (contoh di project)
+
+- `cmd/api`: `go ListenAndServe` supaya main bisa tunggu OS signal + graceful shutdown
+- `product` service: `go publishProductCreatedAsync` supaya HTTP response tidak nunggu MQ
+
+## REST resources
+
+- Plural nouns: `/products`
+- Method: GET list/detail, POST create, PUT update, DELETE delete
+- Ownership check di service (`userId` match) → `ErrForbidden`
