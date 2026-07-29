@@ -1,0 +1,15 @@
+.git
+.cursor
+.env
+*.md
+bin/
+tmp/
+coverage.out
+coverage.html
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.test
+*.out
+*.exe

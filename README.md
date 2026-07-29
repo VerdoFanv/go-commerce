@@ -38,19 +38,31 @@ Gaya coding mengikuti pola feature-folder (mirip Wisteria/Jangkau) + layering da
 
 ```bash
 cp .env.example .env
+```
 
-# butuh Docker
-make infra-up
+### Full stack via Docker (recommended)
 
+```bash
+make docker-up
+```
+
+Ini menjalankan PostgreSQL, Redis, RabbitMQ, API, dan worker.
+
+### Local app + Docker infra
+
+```bash
+make infra-up   # postgres, redis, rabbitmq only
 make deps
-make api      # terminal 1 — HTTP :8080
-make worker   # terminal 2 — RabbitMQ consumer
+make api        # terminal 1 — HTTP :8080
+make worker     # terminal 2 — RabbitMQ consumer
 ```
 
 API docs (Swagger UI): [http://localhost:8080/docs](http://localhost:8080/docs)  
 OpenAPI raw: [http://localhost:8080/docs/openapi.yaml](http://localhost:8080/docs/openapi.yaml)
 
 RabbitMQ management UI: [http://localhost:15672](http://localhost:15672) (`guest` / `guest`)
+
+Stop everything: `make docker-down`
 
 ## Contoh request
 

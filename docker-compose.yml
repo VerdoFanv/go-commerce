@@ -36,5 +36,43 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      target: api
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      DB_HOST: postgres
+      REDIS_ADDR: redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      DB_HOST: postgres
+      REDIS_ADDR: redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
