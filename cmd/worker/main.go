@@ -22,7 +22,11 @@ func main() {
 		slog.Error("rabbitmq", "err", err)
 		os.Exit(1)
 	}
-	defer mq.Close()
+	defer func() {
+		if err := mq.Close(); err != nil {
+			slog.Warn("rabbitmq close", "err", err)
+		}
+	}()
 
 	deliveries, err := mq.Consume(cfg.RabbitQueue)
 	if err != nil {

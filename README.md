@@ -135,6 +135,7 @@ internal/
   platform/     # postgres, redis, rabbitmq
 pkg/response/
 docs/
+.github/        # CI/CD workflows + Dependabot
 .cursor/rules/
 ```
 
@@ -147,6 +148,7 @@ make test              # unit + integration
 make test-unit
 make test-integration
 make test-cover        # coverage.html
+make ci                # vet + lint + test + build (local mirror of CI)
 ```
 
 ```
@@ -156,6 +158,33 @@ test/
   unit/           # service & middleware unit tests
   integration/    # API tests (Gin + httptest)
 ```
+
+## CI/CD (GitHub Actions)
+
+| Workflow | Trigger | Yang dijalankan |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | PR + push ke `main`/`master` | `go vet`, golangci-lint, unit/integration + race, coverage artifact, build binaries, Docker build (no push) |
+| [`release.yml`](.github/workflows/release.yml) | push `main`/`master`, tag `v*`, atau manual | Build & push image `api` + `worker` ke **GHCR** |
+| [`dependabot.yml`](.github/dependabot.yml) | weekly | Update Go modules, Actions, Docker base images |
+
+Image naming (lowercase):
+
+```text
+ghcr.io/<owner>/golang-be-api:latest
+ghcr.io/<owner>/golang-be-api:sha-<commit>
+ghcr.io/<owner>/golang-be-api:1.0.0   # dari tag v1.0.0
+
+ghcr.io/<owner>/golang-be-worker:...
+```
+
+Release tag contoh:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Setelah image pertama di-push, di GitHub → Packages pastikan visibility package sesuai kebutuhan (private/public).
 
 ## Cursor rules
 

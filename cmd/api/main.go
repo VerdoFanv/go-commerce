@@ -45,14 +45,22 @@ func main() {
 		slog.Error("redis", "err", err)
 		os.Exit(1)
 	}
-	defer redisClient.Close()
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			slog.Warn("redis close", "err", err)
+		}
+	}()
 
 	mqClient, err := rabbitmq.Connect(cfg)
 	if err != nil {
 		slog.Warn("rabbitmq unavailable, events will be skipped", "err", err)
 		mqClient = nil
 	} else {
-		defer mqClient.Close()
+		defer func() {
+			if err := mqClient.Close(); err != nil {
+				slog.Warn("rabbitmq close", "err", err)
+			}
+		}()
 	}
 
 	authRepo := auth.NewRepository(db)
@@ -86,7 +94,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// Goroutine #1: HTTP server jalan paralel, main tetap bisa tunggu signal shutdown.
+	// Goroutine #1: HTTP server jalan parallel, main tetap bisa tunggu signal shutdown.
 	go func() {
 		slog.Info("api listening", "addr", srv.Addr, "env", cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

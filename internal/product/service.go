@@ -16,10 +16,10 @@ import (
 )
 
 type Service struct {
-	repo   Repository
-	cache  *appredis.Client
-	mq     *rabbitmq.Client
-	cfg    config.Config
+	repo  Repository
+	cache *appredis.Client
+	mq    *rabbitmq.Client
+	cfg   config.Config
 }
 
 func NewService(repo Repository, cache *appredis.Client, mq *rabbitmq.Client, cfg config.Config) *Service {

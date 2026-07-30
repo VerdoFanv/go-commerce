@@ -50,11 +50,7 @@ func (h *Handler) register(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.Register(c.Request.Context(), RegisterInput{
-		Name:     req.Name,
-		Email:    req.Email,
-		Password: req.Password,
-	})
+	result, err := h.svc.Register(c.Request.Context(), RegisterInput(req))
 	if mapErr(c, err) {
 		return
 	}
@@ -68,10 +64,7 @@ func (h *Handler) login(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.Login(c.Request.Context(), LoginInput{
-		Email:    req.Email,
-		Password: req.Password,
-	})
+	result, err := h.svc.Login(c.Request.Context(), LoginInput(req))
 	if mapErr(c, err) {
 		return
 	}

@@ -27,11 +27,11 @@ type Config struct {
 	RabbitExchange string
 	RabbitQueue    string
 
-	JWTSecret          string
-	JWTAccessTTL       time.Duration
-	JWTRefreshTTL      time.Duration
-	BcryptCost         int
-	ProductCacheTTL    time.Duration
+	JWTSecret       string
+	JWTAccessTTL    time.Duration
+	JWTRefreshTTL   time.Duration
+	BcryptCost      int
+	ProductCacheTTL time.Duration
 }
 
 func Load() Config {

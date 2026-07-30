@@ -117,12 +117,7 @@ func (h *Handler) update(c *gin.Context) {
 		return
 	}
 
-	product, err := h.svc.Update(c.Request.Context(), userID, id, UpdateInput{
-		Name:        req.Name,
-		Description: req.Description,
-		Price:       req.Price,
-		Stock:       req.Stock,
-	})
+	product, err := h.svc.Update(c.Request.Context(), userID, id, UpdateInput(req))
 	if mapErr(c, err) {
 		return
 	}

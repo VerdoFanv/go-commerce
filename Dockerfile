@@ -4,18 +4,22 @@ FROM golang:1.23-alpine AS builder
 
 WORKDIR /src
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache ca-certificates
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/worker ./cmd/worker
+
 FROM alpine:3.20 AS runtime
 
 WORKDIR /app
 
-RUN adduser -D -H -u 10001 golang
+RUN apk add --no-cache ca-certificates \
+	&& adduser -D -H -u 10001 golang
 
 COPY --from=builder /out/api /app/api
 COPY --from=builder /out/worker /app/worker
