@@ -138,6 +138,25 @@ docs/
 .cursor/rules/
 ```
 
+## Testing
+
+Struktur mirip Jest (`test/` terpusat). Detail: [`test/README.md`](test/README.md).
+
+```bash
+make test              # unit + integration
+make test-unit
+make test-integration
+make test-cover        # coverage.html
+```
+
+```
+test/
+  testutil/       # helpers (config, JWT, HTTP)
+  mocks/          # in-memory repos
+  unit/           # service & middleware unit tests
+  integration/    # API tests (Gin + httptest)
+```
+
 ## Cursor rules
 
 Ada di `.cursor/rules/`:
@@ -145,3 +164,4 @@ Ada di `.cursor/rules/`:
 - `golang-be-overview.mdc` — arsitektur & kontrak
 - `golang-code-style.mdc` — gaya kode Go
 - `golang-api-conventions.mdc` — REST, auth, Redis, RabbitMQ
+- `golang-testing.mdc` — layout & pola testing

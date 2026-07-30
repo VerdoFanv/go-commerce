@@ -4,6 +4,7 @@
 *.md
 bin/
 tmp/
+test/
 coverage.out
 coverage.html
 .DS_Store

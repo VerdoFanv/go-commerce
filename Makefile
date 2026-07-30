@@ -1,4 +1,4 @@
-.PHONY: deps run api worker infra-up infra-down docker-up docker-down docker-build docker-logs tidy test
+.PHONY: deps run api worker infra-up infra-down docker-up docker-down docker-build docker-logs tidy test test-unit test-integration test-race test-cover
 
 deps:
 	go mod tidy
@@ -32,4 +32,17 @@ worker:
 run: api
 
 test:
-	go test ./...
+	go test ./test/unit/... ./test/integration/...
+
+test-unit:
+	go test ./test/unit/...
+
+test-integration:
+	go test ./test/integration/...
+
+test-race:
+	go test -race ./test/unit/... ./test/integration/...
+
+test-cover:
+	go test -coverprofile=coverage.out ./test/unit/... ./test/integration/...
+	go tool cover -html=coverage.out -o coverage.html

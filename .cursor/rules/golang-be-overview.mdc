@@ -28,6 +28,7 @@ RESTful backend dengan **clean architecture**.
 | `internal/config/` | Env config |
 | `pkg/response/` | Envelope JSON response |
 | `docs/` | OpenAPI + Swagger UI |
+| `test/` | Unit + integration tests (Jest-style layout) |
 
 ## Alur request
 

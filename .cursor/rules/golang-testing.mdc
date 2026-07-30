@@ -1,0 +1,36 @@
+---
+description: Enterprise Go testing layout (Jest-equivalent test/ folder)
+globs: test/**/*.go
+alwaysApply: false
+---
+
+# Testing Conventions
+
+## Layout (Jest → Go)
+
+| Jest | Go |
+|---|---|
+| `test/` helpers | `test/testutil/` |
+| mocks | `test/mocks/` |
+| unit specs | `test/unit/<feature>/` |
+| supertest | `test/integration/` |
+
+Jangan tambah `*_test.go` di `internal/` kecuali white-box yang wajib akses unexported.
+
+## Pola
+
+- Package test: `xxx_test` (black-box)
+- Mock implement interface production (`Repository`)
+- HTTP: `testutil.DoJSON` + `WithAPIKey` / `WithBearer`
+- Assert: `github.com/stretchr/testify/require`
+- Config: `testutil.Config()`
+
+## Commands
+
+- `make test` / `make test-unit` / `make test-integration` / `make test-cover`
+
+## Saat feature baru
+
+1. Unit service di `test/unit/<feature>/`
+2. Kalau ada route → case di `test/integration/`
+3. Reuse mock di `test/mocks/` kalau repo baru

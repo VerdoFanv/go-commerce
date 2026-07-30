@@ -11,21 +11,17 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/worker ./cmd/worker
-
 FROM alpine:3.20 AS runtime
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata \
-	&& adduser -D -H -u 10001 appuser
+RUN adduser -D -H -u 10001 golang
 
 COPY --from=builder /out/api /app/api
 COPY --from=builder /out/worker /app/worker
 COPY docs /app/docs
 
-USER appuser
+USER golang
 
 EXPOSE 8080
 
