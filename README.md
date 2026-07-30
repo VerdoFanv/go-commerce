@@ -1,78 +1,138 @@
 # Golang BE
 
-Simple RESTful Go backend dengan clean architecture.
+**Production-oriented REST API** built with Go — clean architecture, JWT auth, Redis caching, and async events over RabbitMQ.
 
-## Stack
+[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Gin](https://img.shields.io/badge/HTTP-Gin-008ECF)](https://gin-gonic.com/)
+[![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![RabbitMQ](https://img.shields.io/badge/Queue-RabbitMQ-FF6600?logo=rabbitmq&logoColor=white)](https://www.rabbitmq.com/)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
-| Layer | Tech |
-|-------|------|
-| HTTP | Gin |
-| ORM | GORM |
-| DB | PostgreSQL |
-| Cache | go-redis |
-| Queue | RabbitMQ (`amqp091-go`) |
-| Auth | JWT + `apikey` header |
+---
 
-## Arsitektur
+## Highlights
 
+- **Clean architecture** — `Handler → Service → Repository` with feature packages under `internal/`
+- **Auth** — JWT access/refresh tokens + required `apikey` header
+- **Caching** — Redis read-through for product list & detail
+- **Async events** — `product.created` published to RabbitMQ without blocking HTTP
+- **API contract** — envelope `{ success, message, data }` with camelCase JSON
+- **Ops-ready** — Docker Compose, multi-stage images, CI lint/test/build, GHCR release
+
+---
+
+## Architecture
+
+```text
+                    ┌─────────────────────────────────────┐
+                    │              cmd/api                │
+                    │         (HTTP :8080 + JWT)          │
+                    └─────────────────┬───────────────────┘
+                                      │
+              Handler ──► Service ──► Repository ──► PostgreSQL
+                            │    │
+                     Redis ◄─┘    └──► RabbitMQ ──► cmd/worker
 ```
-Request → Handler → Service → Repository → PostgreSQL
-                      ↓           ↓
-                   RabbitMQ     Redis
-                   (goroutine)
-```
 
-Contoh goroutine di project:
-- `cmd/api` — HTTP server di `go func()` supaya main bisa graceful shutdown
-- `product` create — publish `product.created` ke RabbitMQ secara async
+| Layer          | Responsibility                                        |
+| -------------- | ----------------------------------------------------- |
+| **Handler**    | Parse/validate HTTP, map domain errors → status codes |
+| **Service**    | Business rules, cache, publish events                 |
+| **Repository** | GORM / data access only                               |
+| **Domain**     | Entities + sentinel errors                            |
 
-Gaya coding mengikuti pola feature-folder (mirip Wisteria/Jangkau) + layering dari kurikulum Go kamu:
+Graceful shutdown on the API process; product create publishes MQ events in a background goroutine so responses stay fast.
 
-- `handler.go` — HTTP only
-- `service.go` — business rules, cache, publish event
-- `repository.go` — GORM
-- `domain/` — entity + sentinel errors
-- Response envelope seperti Wisteria mobile: `{ success, message, data }` + JSON **camelCase**
+---
+
+## Tech stack
+
+| Concern   | Choice                        |
+| --------- | ----------------------------- |
+| Language  | Go **1.23**                   |
+| HTTP      | Gin                           |
+| ORM       | GORM                          |
+| Database  | PostgreSQL 16                 |
+| Cache     | go-redis                      |
+| Messaging | RabbitMQ (`amqp091-go`)       |
+| Auth      | JWT (`golang-jwt`) + `apikey` |
+| Lint      | `go vet` + golangci-lint      |
+| CI/CD     | GitHub Actions → GHCR         |
+
+---
 
 ## Quick start
+
+### 1. Configure
 
 ```bash
 cp .env.example .env
 ```
 
-### Full stack via Docker (recommended)
+### 2. Run (pick one)
+
+**Full stack (recommended)**
 
 ```bash
 make docker-up
 ```
 
-Ini menjalankan PostgreSQL, Redis, RabbitMQ, API, dan worker.
+Starts PostgreSQL, Redis, RabbitMQ, API, and worker.
 
-### Local app + Docker infra
+**App locally + infra in Docker**
 
 ```bash
-make infra-up   # postgres, redis, rabbitmq only
+make infra-up
 make deps
-make api        # terminal 1 — HTTP :8080
-make worker     # terminal 2 — RabbitMQ consumer
+make api      # terminal 1 → :8080
+make worker   # terminal 2 → consumer
 ```
 
-API docs (Swagger UI): [http://localhost:8080/docs](http://localhost:8080/docs)  
-OpenAPI raw: [http://localhost:8080/docs/openapi.yaml](http://localhost:8080/docs/openapi.yaml)
+### 3. Open docs
 
-RabbitMQ management UI: [http://localhost:15672](http://localhost:15672) (`guest` / `guest`)
+| Service     | URL                                                                                |
+| ----------- | ---------------------------------------------------------------------------------- |
+| Swagger UI  | [http://localhost:8080/docs](http://localhost:8080/docs)                           |
+| OpenAPI     | [http://localhost:8080/docs/openapi.yaml](http://localhost:8080/docs/openapi.yaml) |
+| RabbitMQ UI | [http://localhost:15672](http://localhost:15672) (`guest` / `guest`)               |
 
-Stop everything: `make docker-down`
+Stop: `make docker-down`
 
-## Contoh request
+---
 
-Semua request ke `/api/v1` butuh header:
+## API overview
+
+All `/api/v1` routes require:
 
 ```http
 apikey: dev-api-key
 ```
 
-### Register
+Protected routes also need:
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+| Method   | Path                                   | Auth            | Notes              |
+| -------- | -------------------------------------- | --------------- | ------------------ |
+| `GET`    | `/api/v1/health`                       | apikey          | Liveness / DB ping |
+| `POST`   | `/api/v1/authentication/register`      | apikey          | Create account     |
+| `POST`   | `/api/v1/authentication/login`         | apikey          | Issue tokens       |
+| `POST`   | `/api/v1/authentication/refresh-token` | apikey          | Rotate tokens      |
+| `GET`    | `/api/v1/authentication/me`            | apikey + bearer | Current user       |
+| `GET`    | `/api/v1/products`                     | apikey + bearer | List (cached)      |
+| `POST`   | `/api/v1/products`                     | apikey + bearer | Create + MQ event  |
+| `GET`    | `/api/v1/products/:id`                 | apikey + bearer | Detail (cached)    |
+| `PUT`    | `/api/v1/products/:id`                 | apikey + bearer | Update (owner)     |
+| `DELETE` | `/api/v1/products/:id`                 | apikey + bearer | Delete (owner)     |
+
+Full schemas: [`docs/openapi.yaml`](docs/openapi.yaml)
+
+### Try it
+
+**Register**
 
 ```bash
 curl -s http://localhost:8080/api/v1/authentication/register \
@@ -81,7 +141,7 @@ curl -s http://localhost:8080/api/v1/authentication/register \
   -d '{"name":"Andi","email":"andi@example.com","password":"secret1"}'
 ```
 
-### Login
+**Login**
 
 ```bash
 curl -s http://localhost:8080/api/v1/authentication/login \
@@ -90,7 +150,7 @@ curl -s http://localhost:8080/api/v1/authentication/login \
   -d '{"email":"andi@example.com","password":"secret1"}'
 ```
 
-### Create product (publish event `product.created`)
+**Create product** (publishes `product.created`)
 
 ```bash
 curl -s http://localhost:8080/api/v1/products \
@@ -100,97 +160,110 @@ curl -s http://localhost:8080/api/v1/products \
   -d '{"name":"Kopi Susu","description":"Iced","price":28000,"stock":10}'
 ```
 
-Worker akan log event yang diterima dari queue.
+**Success envelope**
 
-## API surface
-
-| Method | Path | Auth | Keterangan |
-|--------|------|------|------------|
-| GET | `/api/v1/health` | apikey | Health check |
-| POST | `/api/v1/authentication/register` | apikey | Register |
-| POST | `/api/v1/authentication/login` | apikey | Login |
-| POST | `/api/v1/authentication/refresh-token` | apikey | Refresh JWT |
-| GET | `/api/v1/authentication/me` | apikey + bearer | Profile |
-| GET | `/api/v1/products` | apikey + bearer | List (Redis cache) |
-| POST | `/api/v1/products` | apikey + bearer | Create + MQ event |
-| GET | `/api/v1/products/:id` | apikey + bearer | Detail (Redis cache) |
-| PUT | `/api/v1/products/:id` | apikey + bearer | Update |
-| DELETE | `/api/v1/products/:id` | apikey + bearer | Delete |
-
-Detail schema lengkap ada di `docs/openapi.yaml`.
-
-## Struktur
-
+```json
+{
+  "success": true,
+  "message": "product created",
+  "data": { "id": 1, "name": "Kopi Susu", "userId": 1 }
+}
 ```
+
+---
+
+## Project layout
+
+```text
 cmd/
-  api/          # HTTP server
-  worker/       # RabbitMQ consumer
+  api/                 HTTP server
+  worker/              RabbitMQ consumer
 internal/
-  auth/
-  product/
-  health/
-  config/
-  domain/
-  middleware/
-  platform/     # postgres, redis, rabbitmq
-pkg/response/
-docs/
-.github/        # CI/CD workflows + Dependabot
-.cursor/rules/
+  auth/                Register, login, refresh, me
+  product/             CRUD + cache + events
+  health/              Health check
+  config/              Env-based config
+  domain/              Entities & sentinel errors
+  middleware/          API key, JWT, logging
+  platform/            Postgres, Redis, RabbitMQ adapters
+pkg/response/          JSON envelope helpers
+test/
+  testutil/            Shared test helpers
+  mocks/               In-memory repositories
+  unit/                Unit tests by feature
+  integration/         HTTP API tests
+docs/                  OpenAPI + Swagger UI
+.github/               CI, release, Dependabot
 ```
 
-## Testing
+---
 
-Struktur mirip Jest (`test/` terpusat). Detail: [`test/README.md`](test/README.md).
+## Testing & quality
+
+Centralized `test/` layout (Jest-style). Details: [`test/README.md`](test/README.md)
 
 ```bash
-make test              # unit + integration
+make test               # unit + integration
 make test-unit
 make test-integration
-make test-cover        # coverage.html
-make ci                # vet + lint + test + build (local mirror of CI)
+make test-race
+make test-cover         # → coverage.html
+make lint               # golangci-lint
+make ci                 # vet + lint + test + build
 ```
 
-```
-test/
-  testutil/       # helpers (config, JWT, HTTP)
-  mocks/          # in-memory repos
-  unit/           # service & middleware unit tests
-  integration/    # API tests (Gin + httptest)
-```
+---
 
-## CI/CD (GitHub Actions)
+## CI/CD
 
-| Workflow | Trigger | Yang dijalankan |
-|---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | PR + push ke `main`/`master` | `go vet`, golangci-lint, unit/integration + race, coverage artifact, build binaries, Docker build (no push) |
-| [`release.yml`](.github/workflows/release.yml) | push `main`/`master`, tag `v*`, atau manual | Build & push image `api` + `worker` ke **GHCR** |
-| [`dependabot.yml`](.github/dependabot.yml) | weekly | Update Go modules, Actions, Docker base images |
+| Workflow                                 | When                        | What                                                            |
+| ---------------------------------------- | --------------------------- | --------------------------------------------------------------- |
+| [CI](.github/workflows/ci.yml)           | PR & push to `main`         | vet, lint, tests (+ race), coverage, binary build, Docker build |
+| [Release](.github/workflows/release.yml) | `main`, tag `v*`, or manual | Push `api` & `worker` images to **GHCR**                        |
+| [Dependabot](.github/dependabot.yml)     | Weekly                      | Go modules, Actions, Docker bases                               |
 
-Image naming (lowercase):
+**Images**
 
 ```text
 ghcr.io/<owner>/golang-be-api:latest
 ghcr.io/<owner>/golang-be-api:sha-<commit>
-ghcr.io/<owner>/golang-be-api:1.0.0   # dari tag v1.0.0
+ghcr.io/<owner>/golang-be-api:1.0.0
 
 ghcr.io/<owner>/golang-be-worker:...
 ```
 
-Release tag contoh:
+**Tag a release**
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Setelah image pertama di-push, di GitHub → Packages pastikan visibility package sesuai kebutuhan (private/public).
+After the first push, set package visibility under GitHub → Packages as needed.
 
-## Cursor rules
+---
 
-Ada di `.cursor/rules/`:
+## Make targets
 
-- `golang-be-overview.mdc` — arsitektur & kontrak
-- `golang-code-style.mdc` — gaya kode Go
-- `golang-api-conventions.mdc` — REST, auth, Redis, RabbitMQ
-- `golang-testing.mdc` — layout & pola testing
+| Target                                | Description                      |
+| ------------------------------------- | -------------------------------- |
+| `make docker-up`                      | Full stack via Compose           |
+| `make docker-down`                    | Tear down Compose                |
+| `make infra-up`                       | Postgres + Redis + RabbitMQ only |
+| `make api` / `make worker`            | Run processes locally            |
+| `make test` / `make lint` / `make ci` | Quality gates                    |
+
+---
+
+## Conventions
+
+Cursor rules live in [`.cursor/rules/`](.cursor/rules/):
+
+| Rule                     | Focus                          |
+| ------------------------ | ------------------------------ |
+| `golang-be-overview`     | Architecture & API contract    |
+| `golang-code-style`      | Go naming & layering           |
+| `golang-api-conventions` | Auth, Redis, RabbitMQ patterns |
+| `golang-testing`         | `test/` layout & mocks         |
+
+---
