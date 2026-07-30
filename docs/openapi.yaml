@@ -3,7 +3,7 @@ info:
   title: Golang BE API
   description: |
     Simple RESTful backend dengan clean architecture.
-    Stack: Gin, GORM, PostgreSQL, Redis, RabbitMQ.
+    Stack: Fiber, GORM, PostgreSQL, Redis, RabbitMQ.
 
     Envelope response mengikuti kontrak Wisteria mobile:
     `{ success, message, data }`.

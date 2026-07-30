@@ -2,8 +2,8 @@
 
 **Production-oriented REST API** built with Go — clean architecture, JWT auth, Redis caching, and async events over RabbitMQ.
 
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![Gin](https://img.shields.io/badge/HTTP-Gin-008ECF)](https://gin-gonic.com/)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Fiber](https://img.shields.io/badge/HTTP-Fiber-00ACD7)](https://gofiber.io/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 [![RabbitMQ](https://img.shields.io/badge/Queue-RabbitMQ-FF6600?logo=rabbitmq&logoColor=white)](https://www.rabbitmq.com/)
@@ -50,8 +50,8 @@ Graceful shutdown on the API process; product create publishes MQ events in a ba
 
 | Concern   | Choice                        |
 | --------- | ----------------------------- |
-| Language  | Go **1.23**                   |
-| HTTP      | Gin                           |
+| Language  | Go **1.25**                   |
+| HTTP      | Fiber                         |
 | ORM       | GORM                          |
 | Database  | PostgreSQL 16                 |
 | Cache     | go-redis                      |

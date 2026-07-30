@@ -3,7 +3,7 @@ package response
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 // Envelope matches Wisteria mobile ApiResponse shape.
@@ -14,33 +14,33 @@ type Envelope struct {
 	Errors  any    `json:"errors,omitempty"`
 }
 
-func Success(c *gin.Context, status int, message string, data any) {
-	c.JSON(status, Envelope{
+func Success(c *fiber.Ctx, status int, message string, data any) error {
+	return c.Status(status).JSON(Envelope{
 		Success: true,
 		Message: message,
 		Data:    data,
 	})
 }
 
-func Fail(c *gin.Context, status int, message string) {
-	c.JSON(status, Envelope{
+func Fail(c *fiber.Ctx, status int, message string) error {
+	return c.Status(status).JSON(Envelope{
 		Success: false,
 		Message: message,
 	})
 }
 
-func FailWithErrors(c *gin.Context, status int, message string, errors any) {
-	c.JSON(status, Envelope{
+func FailWithErrors(c *fiber.Ctx, status int, message string, errors any) error {
+	return c.Status(status).JSON(Envelope{
 		Success: false,
 		Message: message,
 		Errors:  errors,
 	})
 }
 
-func OK(c *gin.Context, message string, data any) {
-	Success(c, http.StatusOK, message, data)
+func OK(c *fiber.Ctx, message string, data any) error {
+	return Success(c, http.StatusOK, message, data)
 }
 
-func Created(c *gin.Context, message string, data any) {
-	Success(c, http.StatusCreated, message, data)
+func Created(c *fiber.Ctx, message string, data any) error {
+	return Success(c, http.StatusCreated, message, data)
 }

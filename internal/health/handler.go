@@ -3,7 +3,7 @@ package health
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"github.com/verdofanv/golang-be/pkg/response"
 	"gorm.io/gorm"
 )
@@ -16,22 +16,20 @@ func NewHandler(db *gorm.DB) *Handler {
 	return &Handler{db: db}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.GET("/health", h.check)
+func (h *Handler) RegisterRoutes(rg fiber.Router) {
+	rg.Get("/health", h.check)
 }
 
-func (h *Handler) check(c *gin.Context) {
+func (h *Handler) check(c *fiber.Ctx) error {
 	sqlDB, err := h.db.DB()
 	if err != nil {
-		response.Fail(c, http.StatusServiceUnavailable, "database unavailable")
-		return
+		return response.Fail(c, http.StatusServiceUnavailable, "database unavailable")
 	}
 	if err := sqlDB.Ping(); err != nil {
-		response.Fail(c, http.StatusServiceUnavailable, "database unavailable")
-		return
+		return response.Fail(c, http.StatusServiceUnavailable, "database unavailable")
 	}
 
-	response.OK(c, "ok", gin.H{
+	return response.OK(c, "ok", fiber.Map{
 		"status": "healthy",
 	})
 }

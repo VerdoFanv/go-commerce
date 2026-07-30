@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -22,45 +22,41 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func RequestLogger() gin.HandlerFunc {
-	return func(c *gin.Context) {
+func RequestLogger() fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		start := time.Now()
-		c.Next()
+		err := c.Next()
 		slog.Info("request",
-			"method", c.Request.Method,
-			"path", c.Request.URL.Path,
-			"status", c.Writer.Status(),
+			"method", c.Method(),
+			"path", c.Path(),
+			"status", c.Response().StatusCode(),
 			"duration", time.Since(start).String(),
 		)
+		return err
 	}
 }
 
-func APIKey(expected string) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func APIKey(expected string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		if expected == "" {
-			c.Next()
-			return
+			return c.Next()
 		}
-		key := c.GetHeader("apikey")
+		key := c.Get("apikey")
 		if key == "" {
-			key = c.GetHeader("X-API-Key")
+			key = c.Get("X-API-Key")
 		}
 		if key != expected {
-			response.Fail(c, http.StatusUnauthorized, domain.ErrInvalidAPIKey.Error())
-			c.Abort()
-			return
+			return response.Fail(c, http.StatusUnauthorized, domain.ErrInvalidAPIKey.Error())
 		}
-		c.Next()
+		return c.Next()
 	}
 }
 
-func Auth(secret string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
+func Auth(secret string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		header := c.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
-			response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
-			c.Abort()
-			return
+			return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
 		}
 
 		tokenStr := strings.TrimPrefix(header, "Bearer ")
@@ -73,24 +69,20 @@ func Auth(secret string) gin.HandlerFunc {
 			if err != nil && strings.Contains(err.Error(), "token is expired") {
 				msg = domain.ErrTokenExpired.Error()
 			}
-			response.Fail(c, http.StatusUnauthorized, msg)
-			c.Abort()
-			return
+			return response.Fail(c, http.StatusUnauthorized, msg)
 		}
 		if claims.Type != "" && claims.Type != "access" {
-			response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
-			c.Abort()
-			return
+			return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
 		}
 
-		c.Set(ContextUserIDKey, claims.UserID)
-		c.Next()
+		c.Locals(ContextUserIDKey, claims.UserID)
+		return c.Next()
 	}
 }
 
-func UserID(c *gin.Context) (uint, bool) {
-	v, ok := c.Get(ContextUserIDKey)
-	if !ok {
+func UserID(c *fiber.Ctx) (uint, bool) {
+	v := c.Locals(ContextUserIDKey)
+	if v == nil {
 		return 0, false
 	}
 	id, ok := v.(uint)

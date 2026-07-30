@@ -8,18 +8,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
-func init() {
-	gin.SetMode(gin.TestMode)
-}
-
-// NewRouter returns a bare gin engine for handler tests.
-func NewRouter() *gin.Engine {
-	r := gin.New()
-	r.Use(gin.Recovery())
-	return r
+// NewRouter returns a bare Fiber app for handler tests.
+func NewRouter() *fiber.App {
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(recover.New())
+	return app
 }
 
 type RequestOption func(*http.Request)
@@ -44,8 +41,8 @@ func WithAPIKey(key string) RequestOption {
 	return WithHeader("apikey", key)
 }
 
-// DoJSON performs an HTTP request against a gin engine and returns status + decoded envelope-ish map.
-func DoJSON(t *testing.T, r http.Handler, method, path string, body any, opts ...RequestOption) (int, map[string]any) {
+// DoJSON performs an HTTP request against a Fiber app and returns status + decoded envelope-ish map.
+func DoJSON(t *testing.T, app *fiber.App, method, path string, body any, opts ...RequestOption) (int, map[string]any) {
 	t.Helper()
 
 	var reader io.Reader
@@ -65,16 +62,24 @@ func DoJSON(t *testing.T, r http.Handler, method, path string, body any, opts ..
 		opt(req)
 	}
 
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
 
 	var out map[string]any
-	if w.Body.Len() > 0 {
-		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
-			t.Fatalf("unmarshal response: %v\nbody=%s", err, w.Body.String())
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal response: %v\nbody=%s", err, string(raw))
 		}
 	}
-	return w.Code, out
+	return resp.StatusCode, out
 }
 
 func DecodeData[T any](t *testing.T, envelope map[string]any) T {

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/middleware"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -18,104 +18,96 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
+func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string) {
 	authGroup := rg.Group("/authentication")
 	{
-		authGroup.POST("/register", h.register)
-		authGroup.POST("/login", h.login)
-		authGroup.POST("/refresh-token", h.refresh)
-		authGroup.GET("/me", middleware.Auth(jwtSecret), h.me)
+		authGroup.Post("/register", h.register)
+		authGroup.Post("/login", h.login)
+		authGroup.Post("/refresh-token", h.refresh)
+		authGroup.Get("/me", middleware.Auth(jwtSecret), h.me)
 	}
 }
 
 type registerRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Name     string `json:"name" validate:"required"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=6"`
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required"`
 }
 
 type refreshRequest struct {
-	RefreshToken string `json:"refreshToken" binding:"required"`
+	RefreshToken string `json:"refreshToken" validate:"required"`
 }
 
-func (h *Handler) register(c *gin.Context) {
+func (h *Handler) register(c *fiber.Ctx) error {
 	var req registerRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid request body")
-		return
+	if err := response.BindJSON(c, &req); err != nil {
+		return response.Fail(c, http.StatusBadRequest, "invalid request body")
 	}
 
-	result, err := h.svc.Register(c.Request.Context(), RegisterInput(req))
-	if mapErr(c, err) {
-		return
+	result, err := h.svc.Register(c.UserContext(), RegisterInput(req))
+	if err != nil {
+		return mapErr(c, err)
 	}
-	response.Created(c, "registered", result)
+	return response.Created(c, "registered", result)
 }
 
-func (h *Handler) login(c *gin.Context) {
+func (h *Handler) login(c *fiber.Ctx) error {
 	var req loginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid request body")
-		return
+	if err := response.BindJSON(c, &req); err != nil {
+		return response.Fail(c, http.StatusBadRequest, "invalid request body")
 	}
 
-	result, err := h.svc.Login(c.Request.Context(), LoginInput(req))
-	if mapErr(c, err) {
-		return
+	result, err := h.svc.Login(c.UserContext(), LoginInput(req))
+	if err != nil {
+		return mapErr(c, err)
 	}
-	response.OK(c, "login success", result)
+	return response.OK(c, "login success", result)
 }
 
-func (h *Handler) refresh(c *gin.Context) {
+func (h *Handler) refresh(c *fiber.Ctx) error {
 	var req refreshRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "invalid request body")
-		return
+	if err := response.BindJSON(c, &req); err != nil {
+		return response.Fail(c, http.StatusBadRequest, "invalid request body")
 	}
 
-	tokens, err := h.svc.Refresh(c.Request.Context(), req.RefreshToken)
-	if mapErr(c, err) {
-		return
+	tokens, err := h.svc.Refresh(c.UserContext(), req.RefreshToken)
+	if err != nil {
+		return mapErr(c, err)
 	}
-	response.OK(c, "token refreshed", tokens)
+	return response.OK(c, "token refreshed", tokens)
 }
 
-func (h *Handler) me(c *gin.Context) {
+func (h *Handler) me(c *fiber.Ctx) error {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
-		return
+		return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
 	}
 
-	user, err := h.svc.Me(c.Request.Context(), userID)
-	if mapErr(c, err) {
-		return
+	user, err := h.svc.Me(c.UserContext(), userID)
+	if err != nil {
+		return mapErr(c, err)
 	}
-	response.OK(c, "success", user)
+	return response.OK(c, "success", user)
 }
 
-func mapErr(c *gin.Context, err error) bool {
-	if err == nil {
-		return false
-	}
+func mapErr(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, domain.ErrInvalid):
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		return response.Fail(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrTokenExpired):
-		response.Fail(c, http.StatusUnauthorized, err.Error())
+		return response.Fail(c, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, domain.ErrEmailTaken):
-		response.Fail(c, http.StatusConflict, err.Error())
+		return response.Fail(c, http.StatusConflict, err.Error())
 	case errors.Is(err, domain.ErrNotFound):
-		response.Fail(c, http.StatusNotFound, err.Error())
+		return response.Fail(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, domain.ErrForbidden):
-		response.Fail(c, http.StatusForbidden, err.Error())
+		return response.Fail(c, http.StatusForbidden, err.Error())
 	default:
-		response.Fail(c, http.StatusInternalServerError, "internal error")
+		return response.Fail(c, http.StatusInternalServerError, "internal error")
 	}
-	return true
 }

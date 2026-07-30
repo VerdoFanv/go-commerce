@@ -21,7 +21,7 @@ alwaysApply: false
 ```go
 type Handler struct { svc *Service }
 func NewHandler(svc *Service) *Handler
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string)
+func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string)
 
 type Service struct { repo Repository; /* deps */ }
 func NewService(...) *Service

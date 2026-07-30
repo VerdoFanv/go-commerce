@@ -1,15 +1,13 @@
 package main
 
 import (
-	"context"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/joho/godotenv"
 	"github.com/verdofanv/golang-be/internal/auth"
 	"github.com/verdofanv/golang-be/internal/config"
@@ -24,10 +22,6 @@ import (
 func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
-
-	if cfg.AppEnv == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	}
 
 	db, err := database.Connect(cfg)
 	if err != nil {
@@ -73,31 +67,27 @@ func main() {
 
 	healthH := health.NewHandler(db)
 
-	r := gin.New()
-	r.Use(gin.Recovery(), middleware.RequestLogger())
+	app := fiber.New(fiber.Config{
+		DisableStartupMessage: cfg.AppEnv == "production",
+		ReadBufferSize:        4096,
+	})
+	app.Use(recover.New(), middleware.RequestLogger())
 
-	api := r.Group("/api/v1")
-	api.Use(middleware.APIKey(cfg.APIKey))
-	{
-		healthH.RegisterRoutes(api)
-		authH.RegisterRoutes(api, cfg.JWTSecret)
-		productH.RegisterRoutes(api, cfg.JWTSecret)
-	}
+	api := app.Group("/api/v1", middleware.APIKey(cfg.APIKey))
+	healthH.RegisterRoutes(api)
+	authH.RegisterRoutes(api, cfg.JWTSecret)
+	productH.RegisterRoutes(api, cfg.JWTSecret)
 
-	r.StaticFile("/docs/openapi.yaml", "./docs/openapi.yaml")
-	r.StaticFile("/docs", "./docs/index.html")
-	r.StaticFile("/docs/", "./docs/index.html")
-
-	srv := &http.Server{
-		Addr:              ":" + cfg.AppPort,
-		Handler:           r,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	app.Static("/docs", "./docs")
+	app.Get("/docs", func(c *fiber.Ctx) error {
+		return c.SendFile("./docs/index.html")
+	})
 
 	// Goroutine #1: HTTP server jalan parallel, main tetap bisa tunggu signal shutdown.
 	go func() {
-		slog.Info("api listening", "addr", srv.Addr, "env", cfg.AppEnv)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		addr := ":" + cfg.AppPort
+		slog.Info("api listening", "addr", addr, "env", cfg.AppEnv)
+		if err := app.Listen(addr); err != nil {
 			slog.Error("server failed", "err", err)
 			os.Exit(1)
 		}
@@ -108,8 +98,6 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
 	slog.Info("shutting down api")
-	_ = srv.Shutdown(ctx)
+	_ = app.Shutdown()
 }

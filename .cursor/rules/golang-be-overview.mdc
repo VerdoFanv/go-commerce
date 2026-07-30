@@ -9,7 +9,7 @@ RESTful backend dengan **clean architecture**.
 
 ## Stack
 
-- **Gin** — HTTP router
+- **Fiber** — HTTP router
 - **GORM** + **PostgreSQL** — persistence
 - **go-redis** — cache
 - **RabbitMQ (amqp091-go)** — async events

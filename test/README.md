@@ -41,7 +41,7 @@ make test-cover        # coverage HTML → coverage.html
 
 1. **Jangan** taruh `*_test.go` di samping source (`internal/...`) kecuali white-box test yang benar-benar butuh unexported symbol.
 2. Unit test = black-box (`package xxx_test`), mock lewat interface.
-3. Integration test = wire Gin router seperti production, tapi repo in-memory (tanpa Postgres/Redis/MQ).
+3. Integration test = wire Fiber app seperti production, tapi repo in-memory (tanpa Postgres/Redis/MQ).
 4. Assertion: `testify/require` (fail-fast).
 5. Config test: selalu `testutil.Config()` (`BcryptCost=MinCost`).
 6. Feature baru → tambah `test/unit/<feature>/` + endpoint baru di `test/integration/` bila ada HTTP surface.
