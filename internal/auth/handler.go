@@ -96,18 +96,19 @@ func (h *Handler) me(c *fiber.Ctx) error {
 }
 
 func mapErr(c *fiber.Ctx, err error) error {
+	code := domain.ErrorCode(err)
 	switch {
 	case errors.Is(err, domain.ErrInvalid):
-		return response.Fail(c, http.StatusBadRequest, err.Error())
+		return response.FailCode(c, http.StatusBadRequest, err.Error(), code)
 	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrTokenExpired):
-		return response.Fail(c, http.StatusUnauthorized, err.Error())
+		return response.FailCode(c, http.StatusUnauthorized, err.Error(), code)
 	case errors.Is(err, domain.ErrEmailTaken):
-		return response.Fail(c, http.StatusConflict, err.Error())
+		return response.FailCode(c, http.StatusConflict, err.Error(), code)
 	case errors.Is(err, domain.ErrNotFound):
-		return response.Fail(c, http.StatusNotFound, err.Error())
+		return response.FailCode(c, http.StatusNotFound, err.Error(), code)
 	case errors.Is(err, domain.ErrForbidden):
-		return response.Fail(c, http.StatusForbidden, err.Error())
+		return response.FailCode(c, http.StatusForbidden, err.Error(), code)
 	default:
-		return response.Fail(c, http.StatusInternalServerError, "internal error")
+		return response.FailCode(c, http.StatusInternalServerError, "internal error", code)
 	}
 }

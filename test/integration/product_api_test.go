@@ -21,7 +21,7 @@ func setupProductAPI() (*fiber.App, string) {
 	authHandler := auth.NewHandler(authSvc)
 
 	productRepo := mocks.NewProductRepository()
-	productSvc := product.NewService(productRepo, nil, nil, cfg)
+	productSvc := product.NewService(productRepo, nil, nil, nil, cfg)
 	productHandler := product.NewHandler(productSvc)
 
 	app := testutil.NewRouter()

@@ -11,19 +11,36 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
-	"github.com/verdofanv/golang-be/internal/platform/rabbitmq"
+	"github.com/verdofanv/golang-be/internal/metrics"
+	"github.com/verdofanv/golang-be/internal/platform/elasticsearch"
+	"github.com/verdofanv/golang-be/internal/platform/kafka"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 )
 
-type Service struct {
-	repo  Repository
-	cache *appredis.Client
-	mq    *rabbitmq.Client
-	cfg   config.Config
+// EventPublisher is satisfied by *kafka.Producer (prod) and test fakes.
+type EventPublisher interface {
+	Publish(ctx context.Context, key string, event kafka.Event) error
 }
 
-func NewService(repo Repository, cache *appredis.Client, mq *rabbitmq.Client, cfg config.Config) *Service {
-	return &Service{repo: repo, cache: cache, mq: mq, cfg: cfg}
+// SearchEngine is satisfied by *elasticsearch.Client (prod) and test fakes.
+type SearchEngine interface {
+	IndexProduct(ctx context.Context, p domain.Product) error
+	DeleteProduct(ctx context.Context, id uint) error
+	Search(ctx context.Context, query string, limit int) ([]elasticsearch.ProductDocument, error)
+}
+
+// Service holds business rules. Every dependency behind an interface is
+// nil-tolerant so unit tests run without infrastructure.
+type Service struct {
+	repo      Repository
+	cache     *appredis.Client
+	publisher EventPublisher
+	search    SearchEngine
+	cfg       config.Config
+}
+
+func NewService(repo Repository, cache *appredis.Client, publisher EventPublisher, search SearchEngine, cfg config.Config) *Service {
+	return &Service{repo: repo, cache: cache, publisher: publisher, search: search, cfg: cfg}
 }
 
 type CreateInput struct {
@@ -39,6 +56,13 @@ type UpdateInput struct {
 	Description *string
 	Price       *float64
 	Stock       *int
+}
+
+// ListResult is the cursor-paginated list payload.
+type ListResult struct {
+	Items      []domain.Product `json:"items"`
+	NextCursor uint             `json:"nextCursor,omitempty"`
+	HasMore    bool             `json:"hasMore"`
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Product, error) {
@@ -62,38 +86,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Product, 
 	_ = s.setCache(ctx, product)
 	_ = s.invalidateListCache(ctx, in.UserID)
 
-	// Publish event di goroutine supaya response HTTP tidak nunggu RabbitMQ.
-	s.publishProductCreatedAsync(product)
+	// Side effects are async: the HTTP response never waits on Kafka/ES.
+	s.publishAsync(domain.EventProductCreated, product)
+	s.indexAsync(product)
 
 	return &product, nil
-}
-
-func (s *Service) publishProductCreatedAsync(product domain.Product) {
-	if s.mq == nil {
-		return
-	}
-
-	// Jangan pakai request context — bisa cancel saat handler selesai.
-	go func(p domain.Product) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		err := s.mq.Publish(ctx, domain.EventProductCreated, rabbitmq.Event{
-			Type: domain.EventProductCreated,
-			Payload: map[string]any{
-				"id":     p.ID,
-				"userId": p.UserID,
-				"name":   p.Name,
-				"price":  p.Price,
-				"stock":  p.Stock,
-			},
-		})
-		if err != nil {
-			slog.Warn("publish product.created failed", "err", err, "productId", p.ID)
-			return
-		}
-		slog.Info("product.created published async", "productId", p.ID)
-	}(product)
 }
 
 func (s *Service) GetByID(ctx context.Context, id uint) (*domain.Product, error) {
@@ -110,37 +107,45 @@ func (s *Service) GetByID(ctx context.Context, id uint) (*domain.Product, error)
 	return &product, nil
 }
 
-func (s *Service) List(ctx context.Context, userID uint) ([]domain.Product, error) {
-	key := listCacheKey(userID)
-	if s.cache != nil {
-		raw, err := s.cache.Get(ctx, key)
-		if err == nil {
-			var products []domain.Product
-			if json.Unmarshal([]byte(raw), &products) == nil {
-				return products, nil
-			}
-		} else if err != redis.Nil {
-			slog.Warn("redis get list failed", "err", err)
+// List implements keyset (cursor) pagination: stable under concurrent writes,
+// O(log n) at any depth — unlike OFFSET which scans every skipped row.
+func (s *Service) List(ctx context.Context, userID, cursor uint, limit int) (*ListResult, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	// Only the first page is cacheable; cursor pages change too cheaply to cache well.
+	if cursor == 0 {
+		if cached, err := s.getCachedFirstPage(ctx, userID); err == nil && cached != nil {
+			return cached, nil
 		}
 	}
 
-	models, err := s.repo.ListByUser(ctx, userID)
+	// Fetch one extra row as the hasMore sentinel.
+	models, err := s.repo.ListByUserCursor(ctx, userID, cursor, limit+1)
 	if err != nil {
 		return nil, err
 	}
 
-	products := make([]domain.Product, 0, len(models))
+	hasMore := len(models) > limit
+	if hasMore {
+		models = models[:limit]
+	}
+
+	items := make([]domain.Product, 0, len(models))
 	for i := range models {
-		products = append(products, toDomain(&models[i]))
+		items = append(items, toDomain(&models[i]))
 	}
 
-	if s.cache != nil {
-		if b, err := json.Marshal(products); err == nil {
-			_ = s.cache.Set(ctx, key, b, s.cfg.ProductCacheTTL)
-		}
+	result := &ListResult{Items: items, HasMore: hasMore}
+	if hasMore && len(items) > 0 {
+		result.NextCursor = items[len(items)-1].ID
 	}
 
-	return products, nil
+	if cursor == 0 {
+		_ = s.cacheFirstPage(ctx, userID, result)
+	}
+	return result, nil
 }
 
 func (s *Service) Update(ctx context.Context, userID, id uint, in UpdateInput) (*domain.Product, error) {
@@ -182,15 +187,18 @@ func (s *Service) Update(ctx context.Context, userID, id uint, in UpdateInput) (
 	product := toDomain(model)
 	_ = s.setCache(ctx, product)
 	_ = s.invalidateListCache(ctx, userID)
+	s.publishAsync(domain.EventProductUpdated, product)
+	s.indexAsync(product)
 	return &product, nil
 }
 
-func (s *Service) Delete(ctx context.Context, userID, id uint) error {
+func (s *Service) Delete(ctx context.Context, userID uint, role string, id uint) error {
 	model, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if model.UserID != userID {
+	// RBAC: owners delete their own products; admins delete anything (moderation).
+	if model.UserID != userID && role != domain.RoleAdmin {
 		return domain.ErrForbidden
 	}
 	if err := s.repo.Delete(ctx, id); err != nil {
@@ -198,7 +206,77 @@ func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 	}
 	_ = s.deleteCache(ctx, id)
 	_ = s.invalidateListCache(ctx, userID)
+
+	deleted := toDomain(model)
+	s.publishAsync(domain.EventProductDeleted, deleted)
+	s.deleteIndexAsync(id)
 	return nil
+}
+
+// Search delegates full-text queries to Elasticsearch. When search is disabled
+// (no ES configured) the handler surfaces 503 — an honest degradation.
+func (s *Service) Search(ctx context.Context, query string, limit int) ([]elasticsearch.ProductDocument, error) {
+	if s.search == nil {
+		return nil, domain.ErrUnavailable
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, domain.ErrInvalid
+	}
+	return s.search.Search(ctx, query, limit)
+}
+
+// publishAsync fires an event without blocking the request. The context is
+// detached on purpose — the request ctx dies when the handler returns.
+func (s *Service) publishAsync(eventType string, p domain.Product) {
+	if s.publisher == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		evt := kafka.NewEvent(eventType, map[string]any{
+			"id":     p.ID,
+			"userId": p.UserID,
+			"name":   p.Name,
+			"price":  p.Price,
+			"stock":  p.Stock,
+		})
+		key := fmt.Sprintf("%d", p.ID)
+		if err := s.publisher.Publish(ctx, key, evt); err != nil {
+			slog.Warn("publish event failed", "type", eventType, "err", err, "productId", p.ID)
+			return
+		}
+		metrics.EventsPublished.WithLabelValues(eventType).Inc()
+		slog.Info("event published", "type", eventType, "productId", p.ID)
+	}()
+}
+
+func (s *Service) indexAsync(p domain.Product) {
+	if s.search == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.search.IndexProduct(ctx, p); err != nil {
+			slog.Warn("search index failed", "err", err, "productId", p.ID)
+		}
+	}()
+}
+
+func (s *Service) deleteIndexAsync(id uint) {
+	if s.search == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.search.DeleteProduct(ctx, id); err != nil {
+			slog.Warn("search delete failed", "err", err, "productId", id)
+		}
+	}()
 }
 
 func (s *Service) getCache(ctx context.Context, id uint) (*domain.Product, error) {
@@ -239,6 +317,35 @@ func (s *Service) invalidateListCache(ctx context.Context, userID uint) error {
 		return nil
 	}
 	return s.cache.Del(ctx, listCacheKey(userID))
+}
+
+func (s *Service) getCachedFirstPage(ctx context.Context, userID uint) (*ListResult, error) {
+	if s.cache == nil {
+		return nil, redis.Nil
+	}
+	raw, err := s.cache.Get(ctx, listCacheKey(userID))
+	if err != nil {
+		return nil, err
+	}
+	var result ListResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, err
+	}
+	if result.Items == nil {
+		result.Items = []domain.Product{}
+	}
+	return &result, nil
+}
+
+func (s *Service) cacheFirstPage(ctx context.Context, userID uint, result *ListResult) error {
+	if s.cache == nil {
+		return nil
+	}
+	b, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return s.cache.Set(ctx, listCacheKey(userID), b, s.cfg.ProductCacheTTL)
 }
 
 func productCacheKey(id uint) string {

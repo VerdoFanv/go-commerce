@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "golang-be.fullname" . }}-worker
+  labels:
+    {{- include "golang-be.labels" . | nindent 4 }}
+    app: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: worker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.worker.metricsPort }}"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: worker
+          image: {{ include "golang-be.image" (dict "Values" .Values "component" "worker") | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.worker.metricsPort }}
+          env:
+            - name: APP_ENV
+              value: {{ .Values.global.env | quote }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.config.kafkaBrokers | quote }}
+            - name: MONGO_URI
+              value: {{ .Values.config.mongoURI | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.worker.metricsPort | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

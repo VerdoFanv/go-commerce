@@ -15,4 +15,6 @@ type Product struct {
 
 const (
 	EventProductCreated = "product.created"
+	EventProductUpdated = "product.updated"
+	EventProductDeleted = "product.deleted"
 )

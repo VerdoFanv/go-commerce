@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: golang-be
+  labels:
+    app: worker
+    app.kubernetes.io/name: golang-be
+spec:
+  # Worker replicas form a Kafka consumer group: partitions are assigned
+  # across pods, so scaling out increases parallelism automatically.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2112"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: worker
+          image: ghcr.io/verdofanv/golang-be-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - name: metrics
+              containerPort: 2112
+          envFrom:
+            - configMapRef:
+                name: golang-be-config
+            - secretRef:
+                name: golang-be-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 192Mi

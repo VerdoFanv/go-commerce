@@ -66,7 +66,7 @@ func DoJSON(t *testing.T, app *fiber.App, method, path string, body any, opts ..
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

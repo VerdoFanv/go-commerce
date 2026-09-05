@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: golang-be-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8080"]
+        labels:
+          service: api
+
+  - job_name: golang-be-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:2112"]
+        labels:
+          service: worker

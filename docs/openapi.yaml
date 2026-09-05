@@ -2,42 +2,80 @@ openapi: 3.0.3
 info:
   title: Golang BE API
   description: |
-    Simple RESTful backend dengan clean architecture.
-    Stack: Fiber, GORM, PostgreSQL, Redis, RabbitMQ.
+    Production-grade REST API dengan event-driven architecture.
 
-    Envelope response mengikuti kontrak Wisteria mobile:
-    `{ success, message, data }`.
-  version: 1.0.0
+    Stack: Fiber, PostgreSQL (versioned migrations), Redis, Kafka (event streaming + DLQ),
+    MongoDB (audit trail), Elasticsearch (full-text search), Prometheus, OpenTelemetry.
+
+    Envelope response mengikuti kontrak:
+    `{ success, message, errorCode?, data, meta? }`.
+
+    - `errorCode` — machine-readable code stabil (mis. `AUTH_TOKEN_EXPIRED`, `PRODUCT_NOT_FOUND`).
+    - `meta` — pagination cursor untuk endpoint list.
+  version: 2.0.0
 servers:
-  - url: http://localhost:8080/api/v1
+  - url: http://localhost:8080
     description: Local
 
 tags:
   - name: Health
   - name: Authentication
   - name: Products
+  - name: Realtime
 
+# Health probes & /metrics intentionally sit OUTSIDE /api/v1 — load balancers,
+# K8s kubelet, and Prometheus must reach them without credentials.
 paths:
-  /health:
+  /health/live:
     get:
       tags: [Health]
-      summary: Health check
-      security:
-        - ApiKeyAuth: []
+      summary: Liveness probe (is the process alive?)
+      security: []
       responses:
         "200":
-          description: OK
+          description: Alive
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SuccessEnvelope"
               example:
                 success: true
-                message: ok
+                message: alive
                 data:
-                  status: healthy
+                  status: up
 
-  /authentication/register:
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe (all dependencies checked)
+      security: []
+      responses:
+        "200":
+          description: All dependencies healthy
+          content:
+            application/json:
+              example:
+                success: true
+                message: ready
+                data:
+                  checks:
+                    postgres: ok
+                    redis: ok
+                    mongo: ok
+                    elasticsearch: ok
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /metrics:
+    get:
+      tags: [Health]
+      summary: Prometheus metrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain: {}
+
+  /api/v1/authentication/register:
     post:
       tags: [Authentication]
       summary: Register user
@@ -60,8 +98,10 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
 
-  /authentication/login:
+  /api/v1/authentication/login:
     post:
       tags: [Authentication]
       summary: Login
@@ -83,10 +123,10 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
 
-  /authentication/refresh-token:
+  /api/v1/authentication/refresh-token:
     post:
       tags: [Authentication]
-      summary: Refresh access token
+      summary: Rotate tokens with a refresh token
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -105,17 +145,15 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/SuccessEnvelope"
-                  - type: object
-                    properties:
-                      data:
-                        $ref: "#/components/schemas/AuthTokens"
+                $ref: "#/components/schemas/AuthEnvelope"
+        "401":
+          description: Token invalid/expired — errorCode `AUTH_TOKEN_EXPIRED` when expired
+          $ref: "#/components/responses/Error"
 
-  /authentication/me:
+  /api/v1/authentication/me:
     get:
       tags: [Authentication]
-      summary: Current user profile
+      summary: Current authenticated user
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
@@ -125,37 +163,42 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/SuccessEnvelope"
-                  - type: object
-                    properties:
-                      data:
-                        $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/UserEnvelope"
+        "401":
+          $ref: "#/components/responses/Error"
 
-  /products:
+  /api/v1/products:
     get:
       tags: [Products]
-      summary: List my products (cached in Redis)
+      summary: List my products (cursor-paginated)
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque cursor from `meta.nextCursor` of the previous page. Omit for the first page.
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
       responses:
         "200":
-          description: OK
+          description: OK — `meta.nextCursor` continues the listing while `meta.hasMore` is true
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/SuccessEnvelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/Product"
+                $ref: "#/components/schemas/ProductListEnvelope"
+        "401":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Products]
-      summary: Create product (publishes RabbitMQ event product.created)
+      summary: Create product (publishes `product.created` to Kafka)
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
@@ -164,72 +207,138 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateProductRequest"
+              $ref: "#/components/schemas/ProductCreateRequest"
       responses:
         "201":
           description: Created
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/SuccessEnvelope"
-                  - type: object
-                    properties:
-                      data:
-                        $ref: "#/components/schemas/Product"
+                $ref: "#/components/schemas/ProductEnvelope"
+        "400":
+          $ref: "#/components/responses/Error"
 
-  /products/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: integer
+  /api/v1/products/search:
     get:
       tags: [Products]
-      summary: Get product by id
+      summary: Full-text search (Elasticsearch)
+      description: Multi-match over name + description with fuzziness. 503 with errorCode `SERVICE_UNAVAILABLE` when search is disabled.
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Matching product documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchEnvelope"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/products/{id}:
+    get:
+      tags: [Products]
+      summary: Product detail (Redis-cached)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductEnvelope"
         "404":
           $ref: "#/components/responses/Error"
     put:
       tags: [Products]
-      summary: Update product
+      summary: Update product (owner only, publishes `product.updated`)
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateProductRequest"
+              $ref: "#/components/schemas/ProductUpdateRequest"
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductEnvelope"
         "403":
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
     delete:
       tags: [Products]
-      summary: Delete product
+      summary: Delete product (owner or admin, publishes `product.deleted`)
+      description: Owners delete their own products. Users with role `admin` can delete any product (RBAC).
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
       responses:
         "200":
-          description: OK
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
         "403":
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
 
+  /ws/products:
+    get:
+      tags: [Realtime]
+      summary: WebSocket — real-time product event stream
+      description: |
+        Upgrade to WebSocket to receive `product.created` / `product.updated` / `product.deleted`
+        events as they flow through Kafka (fan-out by the notifier consumer group).
+
+        Auth via query param because browsers cannot set headers on WebSocket:
+        `ws://localhost:8080/ws/products?token=<accessToken>`
+      security: []
+      responses:
+        "101":
+          description: Switching Protocols — event stream begins
+        "401":
+          description: Invalid token
+
 components:
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+
   securitySchemes:
     ApiKeyAuth:
       type: apiKey
@@ -242,7 +351,7 @@ components:
 
   responses:
     Error:
-      description: Error envelope
+      description: Error envelope with stable machine code
       content:
         application/json:
           schema:
@@ -252,126 +361,148 @@ components:
     SuccessEnvelope:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        message:
-          type: string
+        success: { type: boolean, example: true }
+        message: { type: string }
         data: {}
 
     ErrorEnvelope:
       type: object
       properties:
-        success:
-          type: boolean
-          example: false
-        message:
+        success: { type: boolean, example: false }
+        message: { type: string, example: "not found" }
+        errorCode:
           type: string
-        errors: {}
+          description: Stable machine code
+          enum:
+            - RESOURCE_NOT_FOUND
+            - VALIDATION_ERROR
+            - AUTH_EMAIL_TAKEN
+            - AUTH_TOKEN_EXPIRED
+            - AUTH_UNAUTHORIZED
+            - AUTH_INVALID_API_KEY
+            - AUTH_FORBIDDEN
+            - RATE_LIMIT_EXCEEDED
+            - SERVICE_UNAVAILABLE
+            - INTERNAL_ERROR
 
     RegisterRequest:
       type: object
       required: [name, email, password]
       properties:
-        name:
-          type: string
-        email:
-          type: string
-          format: email
-        password:
-          type: string
-          minLength: 6
+        name: { type: string, example: Andi }
+        email: { type: string, format: email, example: andi@example.com }
+        password: { type: string, minLength: 6, example: secret1 }
 
     LoginRequest:
       type: object
       required: [email, password]
       properties:
-        email:
-          type: string
-          format: email
-        password:
-          type: string
-
-    AuthTokens:
-      type: object
-      properties:
-        accessToken:
-          type: string
-        refreshToken:
-          type: string
+        email: { type: string, format: email }
+        password: { type: string }
 
     User:
       type: object
       properties:
-        id:
-          type: integer
-        name:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        role:
           type: string
-        email:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
+          enum: [user, admin]
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AuthTokens:
+      type: object
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
 
     AuthEnvelope:
-      allOf:
-        - $ref: "#/components/schemas/SuccessEnvelope"
-        - type: object
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
           properties:
-            data:
-              type: object
-              properties:
-                user:
-                  $ref: "#/components/schemas/User"
-                tokens:
-                  $ref: "#/components/schemas/AuthTokens"
+            user: { $ref: "#/components/schemas/User" }
+            tokens: { $ref: "#/components/schemas/AuthTokens" }
+
+    UserEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/User" }
 
     Product:
       type: object
       properties:
-        id:
-          type: integer
-        userId:
-          type: integer
-        name:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-        stock:
-          type: integer
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
+        id: { type: integer }
+        userId: { type: integer }
+        name: { type: string }
+        description: { type: string }
+        price: { type: number }
+        stock: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
-    CreateProductRequest:
+    ProductCreateRequest:
       type: object
       required: [name, price]
       properties:
-        name:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-        stock:
-          type: integer
+        name: { type: string, example: "Kopi Susu" }
+        description: { type: string, example: "Iced" }
+        price: { type: number, example: 28000 }
+        stock: { type: integer, example: 10 }
 
-    UpdateProductRequest:
+    ProductUpdateRequest:
       type: object
       properties:
-        name:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-        stock:
+        name: { type: string }
+        description: { type: string }
+        price: { type: number }
+        stock: { type: integer }
+
+    ProductEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/Product" }
+
+    PageMeta:
+      type: object
+      properties:
+        limit: { type: integer }
+        nextCursor:
           type: integer
+          description: Pass as `cursor` for the next page
+        hasMore: { type: boolean }
+
+    ProductListEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Product" }
+        meta: { $ref: "#/components/schemas/PageMeta" }
+
+    SearchEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              userId: { type: integer }
+              name: { type: string }
+              description: { type: string }
+              price: { type: number }

@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -50,15 +51,27 @@ func (m *ProductRepository) FindByID(_ context.Context, id uint) (*product.Produ
 	return &cp, nil
 }
 
-func (m *ProductRepository) ListByUser(_ context.Context, userID uint) ([]product.ProductModel, error) {
+// ListByUserCursor mirrors the SQL implementation: id < cursor, newest first, limited.
+func (m *ProductRepository) ListByUserCursor(_ context.Context, userID, cursor uint, limit int) ([]product.ProductModel, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	out := make([]product.ProductModel, 0)
 	for _, p := range m.products {
-		if p.UserID == userID {
-			out = append(out, *p)
+		if p.UserID != userID {
+			continue
 		}
+		if cursor > 0 && p.ID >= cursor {
+			continue
+		}
+		out = append(out, *p)
+	}
+
+	// newest first
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

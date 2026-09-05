@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: golang-be-config
+  namespace: golang-be
+data:
+  APP_ENV: "production"
+  APP_PORT: "8080"
+  LOG_LEVEL: "info"
+  DB_HOST: "postgres.database.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "golang_be"
+  DB_SSLMODE: "require"
+  REDIS_ADDR: "redis-master.cache.svc.cluster.local:6379"
+  KAFKA_BROKERS: "kafka.messaging.svc.cluster.local:9092"
+  KAFKA_TOPIC_PRODUCTS: "products.events"
+  KAFKA_TOPIC_DLQ: "products.events.dlq"
+  KAFKA_GROUP_WORKER: "golang-be-worker"
+  KAFKA_GROUP_NOTIFIER: "golang-be-notifier"
+  MONGO_URI: "mongodb://mongodb.database.svc.cluster.local:27017"
+  MONGO_DB: "golang_be_audit"
+  ELASTICSEARCH_ADDR: "http://elasticsearch-master.database.svc.cluster.local:9200"
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector.observability.svc.cluster.local:4317"
+  RATE_LIMIT_MAX: "100"
+  RATE_LIMIT_WINDOW: "1m"
+  REQUEST_TIMEOUT: "10s"
+  SHUTDOWN_TIMEOUT: "15s"
+  METRICS_PORT: "2112"

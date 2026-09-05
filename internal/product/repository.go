@@ -11,7 +11,9 @@ import (
 type Repository interface {
 	Create(ctx context.Context, product *ProductModel) error
 	FindByID(ctx context.Context, id uint) (*ProductModel, error)
-	ListByUser(ctx context.Context, userID uint) ([]ProductModel, error)
+	// ListByUserCursor returns at most `limit` rows with id < cursor, newest first.
+	// cursor == 0 starts from the head. Callers request limit+1 to detect HasMore.
+	ListByUserCursor(ctx context.Context, userID, cursor uint, limit int) ([]ProductModel, error)
 	Update(ctx context.Context, product *ProductModel) error
 	Delete(ctx context.Context, id uint) error
 }
@@ -37,12 +39,17 @@ func (r *repository) FindByID(ctx context.Context, id uint) (*ProductModel, erro
 	return &product, err
 }
 
-func (r *repository) ListByUser(ctx context.Context, userID uint) ([]ProductModel, error) {
-	var products []ProductModel
-	err := r.db.WithContext(ctx).
+func (r *repository) ListByUserCursor(ctx context.Context, userID, cursor uint, limit int) ([]ProductModel, error) {
+	query := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
 		Order("id DESC").
-		Find(&products).Error
+		Limit(limit)
+	if cursor > 0 {
+		query = query.Where("id < ?", cursor)
+	}
+
+	var products []ProductModel
+	err := query.Find(&products).Error
 	return products, err
 }
 

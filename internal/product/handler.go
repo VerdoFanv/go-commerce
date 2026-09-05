@@ -23,6 +23,7 @@ func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string) {
 	products := rg.Group("/products", middleware.Auth(jwtSecret))
 	{
 		products.Get("", h.list)
+		products.Get("/search", h.search) // before /:id so "search" never parses as an ID
 		products.Post("", h.create)
 		products.Get("/:id", h.getByID)
 		products.Put("/:id", h.update)
@@ -71,14 +72,36 @@ func (h *Handler) create(c *fiber.Ctx) error {
 func (h *Handler) list(c *fiber.Ctx) error {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		return response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
 	}
 
-	products, err := h.svc.List(c.UserContext(), userID)
+	cursor, err := parseCursor(c.Query("cursor"))
+	if err != nil {
+		return response.FailCode(c, http.StatusBadRequest, "invalid cursor", domain.ErrorCode(domain.ErrInvalid))
+	}
+	limit := c.QueryInt("limit", 20)
+
+	result, err := h.svc.List(c.UserContext(), userID, cursor, limit)
 	if err != nil {
 		return mapErr(c, err)
 	}
-	return response.OK(c, "success", products)
+	return response.OKWithMeta(c, "success", result.Items, response.PageMeta{
+		Limit:      limit,
+		NextCursor: result.NextCursor,
+		HasMore:    result.HasMore,
+	})
+}
+
+// search is the Elasticsearch-backed full-text endpoint: GET /products/search?q=kopi&limit=20
+func (h *Handler) search(c *fiber.Ctx) error {
+	query := c.Query("q")
+	limit := c.QueryInt("limit", 20)
+
+	docs, err := h.svc.Search(c.UserContext(), query, limit)
+	if err != nil {
+		return mapErr(c, err)
+	}
+	return response.OK(c, "success", docs)
 }
 
 func (h *Handler) getByID(c *fiber.Ctx) error {
@@ -120,15 +143,16 @@ func (h *Handler) update(c *fiber.Ctx) error {
 func (h *Handler) delete(c *fiber.Ctx) error {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		return response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
 	}
+	role, _ := middleware.UserRole(c)
 
 	id, err := parseID(c.Params("id"))
 	if err != nil {
 		return response.Fail(c, http.StatusBadRequest, "invalid id")
 	}
 
-	if err := h.svc.Delete(c.UserContext(), userID, id); err != nil {
+	if err := h.svc.Delete(c.UserContext(), userID, role, id); err != nil {
 		return mapErr(c, err)
 	}
 	return response.OK(c, "product deleted", nil)
@@ -142,17 +166,27 @@ func parseID(raw string) (uint, error) {
 	return uint(n), nil
 }
 
+func parseCursor(raw string) (uint, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return parseID(raw)
+}
+
 func mapErr(c *fiber.Ctx, err error) error {
+	code := domain.ErrorCode(err)
 	switch {
 	case errors.Is(err, domain.ErrInvalid):
-		return response.Fail(c, http.StatusBadRequest, err.Error())
+		return response.FailCode(c, http.StatusBadRequest, err.Error(), code)
 	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrTokenExpired):
-		return response.Fail(c, http.StatusUnauthorized, err.Error())
+		return response.FailCode(c, http.StatusUnauthorized, err.Error(), code)
 	case errors.Is(err, domain.ErrForbidden):
-		return response.Fail(c, http.StatusForbidden, err.Error())
+		return response.FailCode(c, http.StatusForbidden, err.Error(), code)
 	case errors.Is(err, domain.ErrNotFound):
-		return response.Fail(c, http.StatusNotFound, err.Error())
+		return response.FailCode(c, http.StatusNotFound, err.Error(), code)
+	case errors.Is(err, domain.ErrUnavailable):
+		return response.FailCode(c, http.StatusServiceUnavailable, err.Error(), code)
 	default:
-		return response.Fail(c, http.StatusInternalServerError, "internal error")
+		return response.FailCode(c, http.StatusInternalServerError, "internal error", code)
 	}
 }

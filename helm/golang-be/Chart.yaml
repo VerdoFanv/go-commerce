@@ -1,0 +1,13 @@
+apiVersion: v2
+name: golang-be
+description: Production-grade Go backend — API + Kafka worker with full observability
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - golang
+  - kafka
+  - event-driven
+  - microservices
+maintainers:
+  - name: verdofanv

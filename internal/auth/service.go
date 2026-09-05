@@ -49,12 +49,13 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*domain.AuthR
 		Name:         in.Name,
 		Email:        in.Email,
 		PasswordHash: string(hash),
+		Role:         domain.RoleUser,
 	}
 	if err := s.repo.Create(ctx, model); err != nil {
 		return nil, err
 	}
 
-	tokens, err := s.issueTokens(model.ID)
+	tokens, err := s.issueTokens(model.ID, model.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*domain.AuthResult,
 		return nil, domain.ErrUnauthorized
 	}
 
-	tokens, err := s.issueTokens(model.ID)
+	tokens, err := s.issueTokens(model.ID, model.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -113,11 +114,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*domain.Aut
 		return nil, domain.ErrUnauthorized
 	}
 
-	if _, err := s.repo.FindByID(ctx, claims.UserID); err != nil {
+	user, err := s.repo.FindByID(ctx, claims.UserID)
+	if err != nil {
 		return nil, domain.ErrUnauthorized
 	}
 
-	tokens, err := s.issueTokens(claims.UserID)
+	tokens, err := s.issueTokens(user.ID, user.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -133,11 +135,12 @@ func (s *Service) Me(ctx context.Context, userID uint) (*domain.User, error) {
 	return &u, nil
 }
 
-func (s *Service) issueTokens(userID uint) (domain.AuthTokens, error) {
+func (s *Service) issueTokens(userID uint, role string) (domain.AuthTokens, error) {
 	now := time.Now()
 
 	accessClaims := middleware.Claims{
 		UserID: userID,
+		Role:   role,
 		Type:   "access",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.JWTAccessTTL)),
@@ -151,6 +154,7 @@ func (s *Service) issueTokens(userID uint) (domain.AuthTokens, error) {
 
 	refreshClaims := middleware.Claims{
 		UserID: userID,
+		Role:   role,
 		Type:   "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.JWTRefreshTTL)),
@@ -173,6 +177,7 @@ func toDomain(m *UserModel) domain.User {
 		ID:        m.ID,
 		Name:      m.Name,
 		Email:     m.Email,
+		Role:      m.Role,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}

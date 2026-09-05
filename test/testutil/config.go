@@ -18,5 +18,10 @@ func Config() config.Config {
 		JWTRefreshTTL:   24 * time.Hour,
 		BcryptCost:      bcrypt.MinCost,
 		ProductCacheTTL: 5 * time.Minute,
+		RateLimitMax:    100,
+		RateLimitWindow: time.Minute,
+		RequestTimeout:  10 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+		MetricsPort:     "2112",
 	}
 }

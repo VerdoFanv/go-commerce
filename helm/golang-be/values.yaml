@@ -1,0 +1,53 @@
+# Default values for the golang-be chart.
+
+global:
+  env: production
+
+image:
+  registry: ghcr.io
+  repository: verdofanv/golang-be
+  tag: latest
+  pullPolicy: Always
+
+api:
+  replicaCount: 2
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+
+worker:
+  replicaCount: 2
+  metricsPort: 2112
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 192Mi
+
+config:
+  dbHost: postgres.database.svc.cluster.local
+  dbName: golang_be
+  redisAddr: redis-master.cache.svc.cluster.local:6379
+  kafkaBrokers: kafka.messaging.svc.cluster.local:9092
+  mongoURI: mongodb://mongodb.database.svc.cluster.local:27017
+  elasticsearchAddr: http://elasticsearch-master.database.svc.cluster.local:9200
+  otelEndpoint: otel-collector.observability.svc.cluster.local:4317
+  rateLimitMax: "100"
+
+# Secrets are NOT managed by this chart — use external-secrets/sealed-secrets.
+existingSecret: golang-be-secret
+
+serviceAccount:
+  create: true
