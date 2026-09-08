@@ -1,6 +1,11 @@
-# Panduan Belajar — Golang BE (API, Worker, Infra, Ops)
+# Panduan Belajar — Ops & lab (API, Worker, Infra)
 
-Dokumen praktek untuk setup **single-node LAN** (Ubuntu + k3s + Docker Compose).  
+Dokumen **praktek setup / deploy / infra** untuk lab single-node (Ubuntu + k3s + Docker Compose).
+
+**Belajar dari kode** (folder, fungsi, alur E2E) dipisah biar tidak numpuk:
+
+→ **[`docs/belajar/README.md`](belajar/README.md)** — mulai dari situ.
+
 > **Secrets:** password DB/Mongo hanya di `.env` / `k8s/secret.yaml` / compose `infra-db` di server — **jangan** tulis ulang ke git.
 
 Default lab host: **`192.168.0.155`** — ganti jika IP server beda.
@@ -19,7 +24,7 @@ Baca sambil praktek. Jangan hanya scroll.
 6. [Menjalankan (day-to-day)](#6-menjalankan-day-to-day)
 7. [Destroy / teardown](#7-destroy--teardown)
 8. [Backup & restore](#8-backup--restore)
-9. [Belajar API & Worker](#9-belajar-api--worker)
+9. [Belajar API & Worker](#9-belajar-api--worker) → detail di `docs/belajar/`
 10. [Belajar tiap infra + use case](#10-belajar-tiap-infra--use-case)
 11. [Observability](#11-observability)
 12. [Troubleshooting](#12-troubleshooting)
@@ -186,6 +191,8 @@ Client
                       ├─ worker → Mongo audit (+ DLQ)
                       └─ notifier (di API) → WebSocket
 ```
+
+Walkthrough kode (folder, fx, middleware, tiap fitur): **[belajar/](belajar/README.md)**.
 
 ---
 
@@ -442,32 +449,21 @@ chmod 600 ~/k8s-secret-backup.yaml
 
 ## 9. Belajar API & Worker
 
-### API — urutan baca kode
+Penjelasan modul/fungsi lengkap (dipisah per file):
 
-1. `cmd/api/main.go` — fx wiring  
-2. `internal/http/server/` — middleware order  
-3. `internal/http/auth/` — JWT  
-4. `internal/http/product/` — CRUD + side effects  
-5. `internal/http/wishlist/` — relasi + Redis count  
-6. `internal/http/lab/` — eksplorasi infra  
+| Mulai | Isi |
+|-------|-----|
+| [belajar/README.md](belajar/README.md) | Index urutan baca |
+| [01-peta-folder](belajar/01-peta-folder.md) … [08-alur-end-to-end](belajar/08-alur-end-to-end.md) | Dari peta folder sampai E2E create product |
 
-### Worker
+### Cek cepat di lab (ops)
 
 ```bash
 sudo k3s kubectl -n golang-be logs -f deploy/worker
-```
+# POST /lab/kafka/ping → log audited → GET /lab/mongo/events
 
-1. `cmd/worker/main.go`  
-2. `internal/worker/audit/` — retry + DLQ  
-3. `internal/platform/kafka/` — commit setelah sukses  
-
-**Eksperimen:** `POST /lab/kafka/ping` → log `event audited type=lab.ping` → `GET /lab/mongo/events`.
-
-### WebSocket
-
-```bash
 websocat "ws://192.168.0.155/ws/products?token=$TOKEN"
-# di terminal lain: create product sebagai seller → event muncul
+# terminal lain: create product → event muncul di WS
 ```
 
 ---

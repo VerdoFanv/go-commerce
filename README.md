@@ -15,7 +15,7 @@ This repo is a **personal portfolio** backend: not a thin CRUD demo, but archite
 
 It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credible production patterns without needing a 100-node cluster.
 
-**Guides:** [Learning guide (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
+**Guides:** [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
@@ -242,7 +242,7 @@ internal/
 migrations/                 versioned SQL
 k8s/ helm/                  deploy
 .gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
-docs/                       OpenAPI, guides
+docs/                       OpenAPI, belajar/ (code), PANDUAN (ops), GitLab, public access
 test/                       unit / integration / mocks
 ```
 
