@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/verdofanv/golang-be/internal/domain"
-	"github.com/verdofanv/golang-be/internal/product"
+	"github.com/verdofanv/golang-be/internal/http/product"
 )
 
 // ProductRepository is an in-memory product.Repository for unit/integration tests.

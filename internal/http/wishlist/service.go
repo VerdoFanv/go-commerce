@@ -9,7 +9,7 @@ import (
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
-	"github.com/verdofanv/golang-be/internal/product"
+	"github.com/verdofanv/golang-be/internal/http/product"
 )
 
 // ProductFinder is satisfied by product.Repository (avoids importing concrete cycles via iface).

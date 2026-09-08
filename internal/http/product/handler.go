@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
-	"github.com/verdofanv/golang-be/internal/middleware"
+	"github.com/verdofanv/golang-be/internal/http/middleware"
 	"github.com/verdofanv/golang-be/pkg/response"
 )
 

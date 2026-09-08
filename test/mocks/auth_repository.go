@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/verdofanv/golang-be/internal/auth"
+	"github.com/verdofanv/golang-be/internal/http/auth"
 	"github.com/verdofanv/golang-be/internal/domain"
 )
 

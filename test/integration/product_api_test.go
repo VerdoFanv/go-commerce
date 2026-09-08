@@ -6,9 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"github.com/verdofanv/golang-be/internal/auth"
-	"github.com/verdofanv/golang-be/internal/middleware"
-	"github.com/verdofanv/golang-be/internal/product"
+	"github.com/verdofanv/golang-be/internal/http/auth"
+	"github.com/verdofanv/golang-be/internal/http/middleware"
+	"github.com/verdofanv/golang-be/internal/http/product"
 	"github.com/verdofanv/golang-be/test/mocks"
 	"github.com/verdofanv/golang-be/test/testutil"
 )

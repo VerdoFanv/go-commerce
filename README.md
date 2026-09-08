@@ -221,16 +221,29 @@ Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
 ## Project layout
 
 ```text
-cmd/api|worker          Gin API + Kafka worker (fx)
-internal/<feature>/     handler → service → repository
-internal/platform/      postgres, redis, kafka, mongo, typesense, telemetry
-internal/lab/           learning APIs per infra
-migrations/             versioned SQL (embedded)
-k8s/                    k3s manifests (zero-downtime API deploy)
-helm/golang-be/         Helm chart
-.gitlab-ci.yml          GitLab CI (lint/test/build/release/optional deploy)
-docs/                   OpenAPI, learning guide, GitLab + public access guides
-test/                   unit / integration / mocks
+cmd/
+  api/                      HTTP API process (Gin + fx)
+  worker/                   Kafka worker process (fx)
+
+internal/
+  http/                     ★ everything for the API process
+    server/                 Gin engine wiring
+    middleware/             auth, apikey, ratelimit, ...
+    health/                 /health/live|ready
+    auth|product|wishlist|lab/
+    notify/                 WebSocket + Kafka notifier
+  worker/                   ★ everything for the worker process
+    audit/                  consume → Mongo audit + DLQ
+  domain/                   shared entities + errors
+  config/                   shared env config
+  platform/                 shared infra adapters
+  metrics/                  shared Prometheus metrics
+
+migrations/                 versioned SQL
+k8s/ helm/                  deploy
+.gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
+docs/                       OpenAPI, guides
+test/                       unit / integration / mocks
 ```
 
 ---

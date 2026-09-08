@@ -20,22 +20,31 @@ RESTful backend dengan **clean architecture**, event-driven (Kafka), polyglot pe
 - **Prometheus / OTel** — metrics + tracing (observability opt-in)
 - **GitLab CI** — lint/test/build/release (lihat `docs/GITLAB-SETUP.md`)
 
-## Struktur folder
+## Struktur folder (`internal/`)
 
-| Path | Isi |
-|------|-----|
-| `cmd/api` | Entry HTTP API (+ notifier consumer) |
-| `cmd/worker` | Kafka consumer → Mongo audit + DLQ |
-| `internal/<feature>/` | Feature package: `handler.go`, `service.go`, `repository.go`, `model.go` |
-| `internal/domain/` | Entity + sentinel errors |
-| `internal/middleware/` | Auth, API key, logging, rate limit |
-| `internal/platform/` | Infra adapters (db, redis, kafka, mongo, typesense) |
-| `internal/config/` | Env config |
-| `pkg/response/` | Envelope JSON response |
-| `k8s/` | Manifests untuk k3s (app tier saja) |
-| `helm/golang-be/` | Helm chart setara `k8s/` |
-| `docs/` | OpenAPI + Swagger UI |
-| `test/` | Unit + integration tests (Jest-style layout) |
+Pisah **by delivery process**, bukan flat campur aduk:
+
+| Path | Untuk siapa | Isi |
+|------|-------------|-----|
+| `cmd/api` | proses API | composition root HTTP |
+| `cmd/worker` | proses worker | composition root Kafka consumer |
+| `internal/http/` | **API only** | `server`, `middleware`, `health`, features (`auth`, `product`, `wishlist`, `lab`), `notify` (WS) |
+| `internal/worker/` | **worker only** | `audit` (consume → Mongo + DLQ) |
+| `internal/domain/` | shared | entity + sentinel errors |
+| `internal/config/` | shared | env config |
+| `internal/platform/` | shared | db, redis, kafka, mongo, typesense, telemetry |
+| `internal/metrics/` | shared | Prometheus counters (API + worker) |
+| `pkg/response/` | shared | JSON envelope |
+| `migrations/` | shared | SQL schema |
+| `k8s/` / `helm/` | deploy | manifests |
+| `test/` | tests | unit / integration / mocks |
+
+**Rule of thumb**
+
+- Tambah route/handler? → `internal/http/<feature>/`
+- Tambah middleware Gin? → `internal/http/middleware/`
+- Tambah logic consumer Kafka worker? → `internal/worker/<feature>/`
+- Adapter infra baru? → `internal/platform/<name>/`
 
 ## Alur request
 
@@ -65,7 +74,7 @@ RESTful backend dengan **clean architecture**, event-driven (Kafka), polyglot pe
 
 ## Prinsip
 
-- Feature baru = package di `internal/<feature>/`
+- Feature HTTP baru = package di `internal/http/<feature>/`
 - Jangan taruh business logic di handler
 - Reuse `pkg/response` + `domain` errors
 - Strict diff scope — jangan refactor unrelated

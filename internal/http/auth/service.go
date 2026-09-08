@@ -9,7 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
-	"github.com/verdofanv/golang-be/internal/middleware"
+	"github.com/verdofanv/golang-be/internal/http/middleware"
 	"golang.org/x/crypto/bcrypt"
 )
 

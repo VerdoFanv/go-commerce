@@ -445,11 +445,11 @@ chmod 600 ~/k8s-secret-backup.yaml
 ### API — urutan baca kode
 
 1. `cmd/api/main.go` — fx wiring  
-2. `internal/server/server.go` — middleware order  
-3. `internal/auth/` — JWT  
-4. `internal/product/` — CRUD + side effects  
-5. `internal/wishlist/` — relasi + Redis count  
-6. `internal/lab/` — eksplorasi infra  
+2. `internal/http/server/` — middleware order  
+3. `internal/http/auth/` — JWT  
+4. `internal/http/product/` — CRUD + side effects  
+5. `internal/http/wishlist/` — relasi + Redis count  
+6. `internal/http/lab/` — eksplorasi infra  
 
 ### Worker
 
@@ -458,7 +458,7 @@ sudo k3s kubectl -n golang-be logs -f deploy/worker
 ```
 
 1. `cmd/worker/main.go`  
-2. `internal/audit/` — retry + DLQ  
+2. `internal/worker/audit/` — retry + DLQ  
 3. `internal/platform/kafka/` — commit setelah sukses  
 
 **Eksperimen:** `POST /lab/kafka/ping` → log `event audited type=lab.ping` → `GET /lab/mongo/events`.

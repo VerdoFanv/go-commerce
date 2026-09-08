@@ -9,16 +9,16 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/verdofanv/golang-be/internal/auth"
+	"github.com/verdofanv/golang-be/internal/http/auth"
 	"github.com/verdofanv/golang-be/internal/config"
-	"github.com/verdofanv/golang-be/internal/health"
-	"github.com/verdofanv/golang-be/internal/lab"
+	"github.com/verdofanv/golang-be/internal/http/health"
+	"github.com/verdofanv/golang-be/internal/http/lab"
 	"github.com/verdofanv/golang-be/internal/metrics"
-	"github.com/verdofanv/golang-be/internal/middleware"
-	"github.com/verdofanv/golang-be/internal/notify"
+	"github.com/verdofanv/golang-be/internal/http/middleware"
+	"github.com/verdofanv/golang-be/internal/http/notify"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
-	"github.com/verdofanv/golang-be/internal/product"
-	"github.com/verdofanv/golang-be/internal/wishlist"
+	"github.com/verdofanv/golang-be/internal/http/product"
+	"github.com/verdofanv/golang-be/internal/http/wishlist"
 )
 
 // NewEngine builds the fully-middlewared Gin engine.

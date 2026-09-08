@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/verdofanv/golang-be/internal/audit"
+	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 )
 

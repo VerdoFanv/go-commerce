@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/verdofanv/golang-be/internal/config"
-	"github.com/verdofanv/golang-be/internal/middleware"
+	"github.com/verdofanv/golang-be/internal/http/middleware"
 	"github.com/verdofanv/golang-be/pkg/response"
 )
 

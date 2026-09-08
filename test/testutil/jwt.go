@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/verdofanv/golang-be/internal/middleware"
+	"github.com/verdofanv/golang-be/internal/http/middleware"
 )
 
 func SignToken(t *testing.T, secret string, userID uint, tokenType string, ttl time.Duration) string {

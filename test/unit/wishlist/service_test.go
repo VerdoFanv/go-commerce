@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/verdofanv/golang-be/internal/domain"
-	"github.com/verdofanv/golang-be/internal/product"
-	"github.com/verdofanv/golang-be/internal/wishlist"
+	"github.com/verdofanv/golang-be/internal/http/product"
+	"github.com/verdofanv/golang-be/internal/http/wishlist"
 	"github.com/verdofanv/golang-be/test/testutil"
 )
 

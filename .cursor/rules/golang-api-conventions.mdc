@@ -1,6 +1,7 @@
 ---
 description: Konvensi REST API, auth, cache, dan Kafka
-globs: "internal/**/*.go"
+globs: "internal/http/**/*.go"
+
 alwaysApply: false
 ---
 

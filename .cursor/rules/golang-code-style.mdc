@@ -16,12 +16,14 @@ alwaysApply: false
 | JSON tags | camelCase (`json:"refreshToken"`) |
 | DB columns | snake_case via GORM default |
 
-## Pola feature
+## Pola feature (HTTP)
+
+Feature API hidup di `internal/http/<feature>/`:
 
 ```go
 type Handler struct { svc *Service }
 func NewHandler(svc *Service) *Handler
-func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string)
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string)
 
 type Service struct { repo Repository; /* deps */ }
 func NewService(...) *Service
@@ -29,6 +31,8 @@ func NewService(...) *Service
 type Repository interface { /* methods */ }
 func NewRepository(db *gorm.DB) Repository
 ```
+
+Worker feature → `internal/worker/<feature>/` (tanpa Gin handler).
 
 ## Error handling
 

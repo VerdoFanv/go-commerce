@@ -13,7 +13,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/verdofanv/golang-be/internal/audit"
+	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/metrics"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"

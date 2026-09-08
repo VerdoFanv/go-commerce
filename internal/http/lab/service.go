@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/verdofanv/golang-be/internal/audit"
+	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/platform/typesense"
-	"github.com/verdofanv/golang-be/internal/product"
+	"github.com/verdofanv/golang-be/internal/http/product"
 	"gorm.io/gorm"
 )
 
