@@ -1,5 +1,5 @@
 ---
-description: Konvensi REST API, auth, cache, dan RabbitMQ
+description: Konvensi REST API, auth, cache, dan Kafka
 globs: "internal/**/*.go"
 alwaysApply: false
 ---
@@ -22,24 +22,25 @@ alwaysApply: false
 
 - Cache read-through di service layer
 - Invalidate list/detail pada create/update/delete
-- Key pattern: `product:{id}`, `products:user:{userId}`
+- Key pattern: `product:{id}`, `products:user:{userId}` / cursor list cache
 
-## RabbitMQ
+## Kafka
 
-- Publish dari service setelah persist sukses
-- Routing key contoh: `product.created`
-- Worker di `cmd/worker` consume + ack
-- Jika MQ down saat boot API: log warn, lanjut tanpa event (jangan crash API)
-- Publish event boleh async via `go func()` + `context.WithTimeout(context.Background(), ...)`
+- Publish dari service setelah persist sukses (`product.created` / updated / deleted)
+- Topics: `products.events` + DLQ `products.events.dlq`
+- Worker (`cmd/worker`, group `golang-be-worker`) → Mongo audit; exhausted → DLQ
+- Notifier (di API process, group `golang-be-notifier`) → WebSocket fan-out
+- Offset commit hanya setelah side effect sukses (at-least-once)
+- Publish event async via `go` + `context.WithTimeout(context.Background(), ...)`
   (jangan reuse request context — bisa cancel saat handler return)
 
 ## Goroutine (contoh di project)
 
-- `cmd/api`: `go ListenAndServe` supaya main bisa tunggu OS signal + graceful shutdown
-- `product` service: `go publishProductCreatedAsync` supaya HTTP response tidak nunggu MQ
+- `cmd/api`: listen di goroutine + graceful shutdown via fx lifecycle
+- `product` service: publish Kafka / index Typesense di background supaya HTTP tidak menunggu
 
 ## REST resources
 
 - Plural nouns: `/products`
 - Method: GET list/detail, POST create, PUT update, DELETE delete
-- Ownership check di service (`userId` match) → `ErrForbidden`
+- Ownership check di service (`userId` match) → `ErrForbidden`; role `admin` boleh delete any

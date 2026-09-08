@@ -10,6 +10,7 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrForbidden    = errors.New("forbidden")
 	ErrEmailTaken   = errors.New("email already registered")
+	ErrConflict     = errors.New("conflict")
 	ErrRateLimited  = errors.New("rate limit exceeded")
 	ErrUnavailable  = errors.New("service unavailable")
 	// Message intentionally matches Wisteria mobile interceptor contract.
@@ -26,6 +27,8 @@ func ErrorCode(err error) string {
 		return "VALIDATION_ERROR"
 	case errors.Is(err, ErrEmailTaken):
 		return "AUTH_EMAIL_TAKEN"
+	case errors.Is(err, ErrConflict):
+		return "RESOURCE_CONFLICT"
 	case errors.Is(err, ErrTokenExpired):
 		return "AUTH_TOKEN_EXPIRED"
 	case errors.Is(err, ErrUnauthorized):

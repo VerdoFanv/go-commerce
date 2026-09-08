@@ -16,7 +16,9 @@ services:
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      # PLAINTEXT_HOST must be reachable from k3s pods / LAN clients (not 127.0.0.1).
+      # Override: KAFKA_HOST_ADVERTISE=192.168.0.155 make infra-up
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://${KAFKA_HOST_ADVERTISE:-localhost}:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -43,7 +45,7 @@ services:
       - "8108:8108"
     volumes:
       - typesense_data:/data
-    command: "--data-dir /data --api-key=dev-typesense-dev"
+    command: "--data-dir /data --api-key=dev-typesense-key"
 
   # ---------- Observability plane (opt-in: `docker compose --profile observability up -d`) ----------
   # Off by default — three extra JVM/Go processes the weak CPU doesn't need running 24/7.

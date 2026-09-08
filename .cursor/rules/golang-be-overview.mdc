@@ -5,38 +5,51 @@ alwaysApply: true
 
 # Golang BE — Overview
 
-RESTful backend dengan **clean architecture**.
+RESTful backend dengan **clean architecture**, event-driven (Kafka), polyglot persistence.
 
 ## Stack
 
 - **Fiber** — HTTP router
-- **GORM** + **PostgreSQL** — persistence
-- **go-redis** — cache
-- **RabbitMQ (amqp091-go)** — async events
+- **Uber fx** — DI
+- **GORM** + **PostgreSQL** — source of truth
+- **go-redis** — cache + rate limit
+- **Kafka** (`segmentio/kafka-go`) — domain events + DLQ
+- **MongoDB** — immutable audit trail
+- **Typesense** — full-text search (circuit breaker)
 - **JWT** + **apikey** header — auth (pola Wisteria)
+- **Prometheus / OTel** — metrics + tracing (observability opt-in)
 
 ## Struktur folder
 
 | Path | Isi |
 |------|-----|
-| `cmd/api` | Entry HTTP API |
-| `cmd/worker` | Consumer RabbitMQ |
+| `cmd/api` | Entry HTTP API (+ notifier consumer) |
+| `cmd/worker` | Kafka consumer → Mongo audit + DLQ |
 | `internal/<feature>/` | Feature package: `handler.go`, `service.go`, `repository.go`, `model.go` |
 | `internal/domain/` | Entity + sentinel errors |
-| `internal/middleware/` | Auth, API key, logging |
-| `internal/platform/` | Infra adapters (db, redis, rabbitmq) |
+| `internal/middleware/` | Auth, API key, logging, rate limit |
+| `internal/platform/` | Infra adapters (db, redis, kafka, mongo, typesense) |
 | `internal/config/` | Env config |
 | `pkg/response/` | Envelope JSON response |
+| `k8s/` | Manifests untuk k3s (app tier saja) |
+| `helm/golang-be/` | Helm chart setara `k8s/` |
 | `docs/` | OpenAPI + Swagger UI |
 | `test/` | Unit + integration tests (Jest-style layout) |
 
 ## Alur request
 
-`Handler → Service → Repository → DB/Cache/MQ`
+`Handler → Service → Repository → DB/Cache` lalu async: Typesense index + Kafka publish
 
 - Handler: parse/validate HTTP, map error → status
 - Service: business rules, cache, publish event
 - Repository: GORM / data access saja
+
+## Deploy model (dev / single-node)
+
+- **Docker Compose**: Kafka + Typesense (+ optional observability). Postgres/Redis/Mongo biasanya di compose terpisah (`shared-net`).
+- **k3s**: hanya **api** + **worker** (stateless). ConfigMap mengarah ke `HOST_IP` (LAN IP host) untuk data plane.
+- Kafka `PLAINTEXT_HOST` harus advertise LAN IP (`KAFKA_HOST_ADVERTISE`), bukan `localhost`, supaya pod k3s bisa reconnect.
+- Image lokal: `golang-be-api:local` / `golang-be-worker:local` + `imagePullPolicy: IfNotPresent`.
 
 ## Kontrak API (Wisteria-style)
 

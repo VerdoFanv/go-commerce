@@ -31,8 +31,10 @@ spec:
         fsGroup: 10001
       containers:
         - name: api
-          image: ghcr.io/verdofanv/golang-be-api:latest
-          imagePullPolicy: Always
+          # Dev/single-node: prefer locally imported image (see README Option A).
+          # Swap to ghcr.io/verdofanv/golang-be-api:latest + Always for CI pulls.
+          image: golang-be-api:local
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080

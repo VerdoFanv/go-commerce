@@ -10,9 +10,11 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
+	"github.com/verdofanv/golang-be/internal/audit"
 	"github.com/verdofanv/golang-be/internal/auth"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/health"
+	"github.com/verdofanv/golang-be/internal/lab"
 	"github.com/verdofanv/golang-be/internal/notify"
 	"github.com/verdofanv/golang-be/internal/platform/database"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
@@ -22,6 +24,7 @@ import (
 	"github.com/verdofanv/golang-be/internal/platform/typesense"
 	"github.com/verdofanv/golang-be/internal/product"
 	"github.com/verdofanv/golang-be/internal/server"
+	"github.com/verdofanv/golang-be/internal/wishlist"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 )
@@ -51,12 +54,21 @@ func main() {
 
 		// --- Interface adapters (decouple services from concrete platforms) ---
 		fx.Provide(func(p *kafka.Producer) product.EventPublisher { return p }),
+		fx.Provide(func(p *kafka.Producer) lab.EventPublisher { return p }),
 		fx.Provide(func(c *typesense.Client) product.SearchEngine {
 			if c == nil {
 				return nil // typed-nil trap: return an untyped nil interface
 			}
 			return c
 		}),
+		fx.Provide(func(c *typesense.Client) lab.SearchEngine {
+			if c == nil {
+				return nil
+			}
+			return c
+		}),
+		fx.Provide(func(c *mongo.Client) *audit.MongoStore { return audit.NewMongoStore(c) }),
+		fx.Provide(func(s *audit.MongoStore) lab.AuditReader { return s }),
 
 		// --- Domain ---
 		fx.Provide(auth.NewRepository),
@@ -65,6 +77,13 @@ func main() {
 		fx.Provide(product.NewRepository),
 		fx.Provide(product.NewService),
 		fx.Provide(product.NewHandler),
+		fx.Provide(wishlist.NewRepository),
+		fx.Provide(func(repo wishlist.Repository, products product.Repository, cache *appredis.Client, cfg config.Config) *wishlist.Service {
+			return wishlist.NewService(repo, products, cache, cfg)
+		}),
+		fx.Provide(wishlist.NewHandler),
+		fx.Provide(lab.NewService),
+		fx.Provide(lab.NewHandler),
 
 		// --- Probes & real-time ---
 		fx.Provide(func(db *gorm.DB, rdb *appredis.Client, mdb *mongo.Client, ts *typesense.Client) *health.Handler {

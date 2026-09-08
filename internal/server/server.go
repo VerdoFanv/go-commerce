@@ -15,11 +15,13 @@ import (
 	"github.com/verdofanv/golang-be/internal/auth"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/health"
+	"github.com/verdofanv/golang-be/internal/lab"
 	"github.com/verdofanv/golang-be/internal/metrics"
 	"github.com/verdofanv/golang-be/internal/middleware"
 	"github.com/verdofanv/golang-be/internal/notify"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/product"
+	"github.com/verdofanv/golang-be/internal/wishlist"
 )
 
 // NewApp builds the fully-middlewared Fiber application.
@@ -30,6 +32,8 @@ func NewApp(
 	redisClient *appredis.Client,
 	authH *auth.Handler,
 	productH *product.Handler,
+	wishlistH *wishlist.Handler,
+	labH *lab.Handler,
 	healthH *health.Handler,
 	notifyH *notify.Handler,
 ) *fiber.App {
@@ -72,6 +76,8 @@ func NewApp(
 	)
 	authH.RegisterRoutes(api, cfg.JWTSecret)
 	productH.RegisterRoutes(api, cfg.JWTSecret)
+	wishlistH.RegisterRoutes(api, cfg.JWTSecret)
+	labH.RegisterRoutes(api, cfg.JWTSecret)
 
 	// --- Real-time ---
 	notifyH.RegisterRoutes(app)

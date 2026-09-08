@@ -46,7 +46,7 @@ response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
 
 ## Lainnya
 
-- Manual DI di `cmd/api/main.go` (repo → service → handler)
+- DI via **Uber fx** di `cmd/api` / `cmd/worker` (bukan manual wire panjang)
 - Logging: `log/slog`
-- Config: `internal/config` + `.env` via `godotenv`
+- Config: `internal/config` dari env (12-factor); validasi struct tag — API key ≠ `url`
 - Jangan import `internal/...` dari package luar module

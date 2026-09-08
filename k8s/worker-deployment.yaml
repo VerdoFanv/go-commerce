@@ -28,8 +28,8 @@ spec:
         fsGroup: 10001
       containers:
         - name: worker
-          image: ghcr.io/verdofanv/golang-be-worker:latest
-          imagePullPolicy: Always
+          image: golang-be-worker:local
+          imagePullPolicy: IfNotPresent
           ports:
             - name: metrics
               containerPort: 2112

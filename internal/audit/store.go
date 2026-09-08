@@ -25,6 +25,33 @@ func (s *MongoStore) Insert(ctx context.Context, record Record) error {
 	return err
 }
 
+// ListRecent returns the newest audit documents (learning / admin read path).
+func (s *MongoStore) ListRecent(ctx context.Context, limit int64) ([]Record, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "processedAt", Value: -1}}).SetLimit(limit)
+	cur, err := s.client.Collection(collectionName).Find(ctx, bson.D{}, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var out []Record
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []Record{}
+	}
+	return out, nil
+}
+
+// Count returns total audit documents.
+func (s *MongoStore) Count(ctx context.Context) (int64, error) {
+	return s.client.Collection(collectionName).CountDocuments(ctx, bson.D{})
+}
+
 // EnsureIndexes creates the audit indexes idempotently (eventId unique →
 // exactly-once audit semantics even under at-least-once delivery).
 func (s *MongoStore) EnsureIndexes(ctx context.Context) error {

@@ -9,8 +9,19 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: golang-be.local # add to /etc/hosts on your client machine -> node IP
+    # Hostname access (add `<node-ip> golang-be.local` to client /etc/hosts).
+    - host: golang-be.local
       http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+    # Bare IP / LAN access: http://<node-ip>/...
+    - http:
         paths:
           - path: /
             pathType: Prefix

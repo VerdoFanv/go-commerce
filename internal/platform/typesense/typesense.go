@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sony/gobreaker/v2"
@@ -135,9 +136,60 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]Product
 }
 
 func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.breaker.Execute(func () (any, error) {
+	_, err := c.breaker.Execute(func() (any, error) {
 		res, e := c.ts.Collections().Retrieve(ctx, &api.GetCollectionsParams{})
 		return res, e
 	})
 	return err
+}
+
+// CollectionStats is a learning-friendly snapshot of the products index.
+type CollectionStats struct {
+	Name         string `json:"name"`
+	NumDocuments int    `json:"numDocuments"`
+	Exists       bool   `json:"exists"`
+}
+
+// Stats returns document count for the products collection (0 if missing).
+func (c *Client) Stats(ctx context.Context) (CollectionStats, error) {
+	res, err := c.breaker.Execute(func() (any, error) {
+		col, e := c.ts.Collection(indexName).Retrieve(ctx)
+		return col, e
+	})
+	if err != nil {
+		// Collection may not exist yet — treat as empty rather than hard fail for lab UIs.
+		return CollectionStats{Name: indexName, Exists: false}, nil
+	}
+	col := res.(*api.CollectionResponse)
+	stats := CollectionStats{Name: indexName, Exists: true}
+	if col.NumDocuments != nil {
+		stats.NumDocuments = int(*col.NumDocuments)
+	}
+	return stats, nil
+}
+
+// EnsureProductsCollection creates the search schema if missing (idempotent).
+func (c *Client) EnsureProductsCollection(ctx context.Context) error {
+	_, err := c.breaker.Execute(func() (any, error) {
+		schema := &api.CollectionSchema{
+			Name: indexName,
+			Fields: []api.Field{
+				{Name: "id", Type: "string"},
+				{Name: "userId", Type: "int32"},
+				{Name: "name", Type: "string"},
+				{Name: "description", Type: "string"},
+				{Name: "price", Type: "float"},
+			},
+		}
+		res, e := c.ts.Collections().Create(ctx, schema)
+		return res, e
+	})
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "already exists") || strings.Contains(msg, "conflict") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

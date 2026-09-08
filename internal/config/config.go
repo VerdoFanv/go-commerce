@@ -39,8 +39,8 @@ type Config struct {
 	MongoDB  string `validate:"required"`
 
 	// Optional: when empty, product search is disabled.
-	TypesenseAddr string `validate:"omitempty,url"`
-	TypesenseAPIKey string `validate:"omitempty,url"`
+	TypesenseAddr   string `validate:"omitempty,url"`
+	TypesenseAPIKey string `validate:"omitempty"`
 
 	OTELEnabled  bool
 	OTelEndpoint string `validate:"omitempty,hostname_port"`

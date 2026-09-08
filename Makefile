@@ -27,6 +27,8 @@ tidy: deps ## Alias for deps
 
 .PHONY: infra-up infra-down docker-up docker-down docker-build docker-logs obs-up obs-down
 infra-up: ## Start core dependencies only (kafka, typesense) — light enough to run always
+	# For k3s pods on the same host, set KAFKA_HOST_ADVERTISE to the LAN IP:
+	#   KAFKA_HOST_ADVERTISE=192.168.0.155 make infra-up
 	docker compose up -d kafka typesense
 
 infra-down: ## Stop all containers (core + observability)
