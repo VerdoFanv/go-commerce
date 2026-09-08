@@ -10,6 +10,7 @@
 .idea/
 .vscode/
 *.swp
+k8s/secret.yaml
 
 # OS
 .DS_Store
