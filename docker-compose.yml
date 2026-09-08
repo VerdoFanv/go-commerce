@@ -79,7 +79,7 @@ services:
       - prometheus
 
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:1.62.0
     profiles: ["observability"]
     mem_limit: 250m
     cpus: 0.5
