@@ -15,11 +15,11 @@ import (
 	"github.com/verdofanv/golang-be/internal/health"
 	"github.com/verdofanv/golang-be/internal/notify"
 	"github.com/verdofanv/golang-be/internal/platform/database"
-	"github.com/verdofanv/golang-be/internal/platform/elasticsearch"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 	"github.com/verdofanv/golang-be/internal/platform/mongo"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/platform/telemetry"
+	"github.com/verdofanv/golang-be/internal/platform/typesense"
 	"github.com/verdofanv/golang-be/internal/product"
 	"github.com/verdofanv/golang-be/internal/server"
 	"go.uber.org/fx"
@@ -36,7 +36,7 @@ func main() {
 		fx.Provide(database.Connect),
 		fx.Provide(appredis.Connect),
 		fx.Provide(mongo.Connect),
-		fx.Provide(elasticsearch.Connect),
+		fx.Provide(typesense.Connect),
 		fx.Provide(func(cfg config.Config) (*telemetry.Provider, error) {
 			return telemetry.Setup(context.Background(), cfg, "golang-be-api")
 		}),
@@ -51,7 +51,7 @@ func main() {
 
 		// --- Interface adapters (decouple services from concrete platforms) ---
 		fx.Provide(func(p *kafka.Producer) product.EventPublisher { return p }),
-		fx.Provide(func(c *elasticsearch.Client) product.SearchEngine {
+		fx.Provide(func(c *typesense.Client) product.SearchEngine {
 			if c == nil {
 				return nil // typed-nil trap: return an untyped nil interface
 			}
@@ -67,12 +67,12 @@ func main() {
 		fx.Provide(product.NewHandler),
 
 		// --- Probes & real-time ---
-		fx.Provide(func(db *gorm.DB, rdb *appredis.Client, mdb *mongo.Client, es *elasticsearch.Client) *health.Handler {
+		fx.Provide(func(db *gorm.DB, rdb *appredis.Client, mdb *mongo.Client, ts *typesense.Client) *health.Handler {
 			return health.NewHandler(
 				health.PostgresCheck{DB: db},
 				health.RedisCheck{Client: rdb},
 				health.MongoCheck{Client: mdb},
-				health.ElasticsearchCheck{Client: es},
+				health.TypesenseCheck{Client: ts},
 			)
 		}),
 		fx.Provide(notify.NewHub),

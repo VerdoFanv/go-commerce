@@ -3,9 +3,9 @@ package health
 import (
 	"context"
 
-	"github.com/verdofanv/golang-be/internal/platform/elasticsearch"
 	"github.com/verdofanv/golang-be/internal/platform/mongo"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
+	"github.com/verdofanv/golang-be/internal/platform/typesense"
 	"gorm.io/gorm"
 )
 
@@ -37,12 +37,12 @@ func (m MongoCheck) Ping(ctx context.Context) error {
 	return m.Client.Ping(ctx)
 }
 
-// ElasticsearchCheck pings the search cluster. A nil client (search disabled)
+// TypesenseCheck pings the search cluster. A nil client (search disabled)
 // reports healthy so probes don't flap when the feature is off.
-type ElasticsearchCheck struct{ Client *elasticsearch.Client }
+type TypesenseCheck struct{ Client *typesense.Client }
 
-func (e ElasticsearchCheck) Name() string { return "elasticsearch" }
-func (e ElasticsearchCheck) Ping(ctx context.Context) error {
+func (e TypesenseCheck) Name() string { return "typesense" }
+func (e TypesenseCheck) Ping(ctx context.Context) error {
 	if e.Client == nil {
 		return nil
 	}

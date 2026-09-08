@@ -4,26 +4,24 @@
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
-
+# install sertificate for secure
 RUN apk add --no-cache ca-certificates
 
-# Layer-cache modules before source.
+# install deps
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-# Static, stripped binaries: no CGO → no libc dependency, minimal attack surface.
+# nonactive c binding and result static binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
 
 # ---------- Runtime base ----------
-# Alpine + non-root user + read-only-capable binary. For maximal hardening,
-# swap this stage to gcr.io/distroless/static-debian12 (no shell at all).
 FROM alpine:3.20 AS runtime
 
 WORKDIR /app
-
+# add new user
 RUN apk add --no-cache ca-certificates wget \
 	&& adduser -D -H -u 10001 golang
 

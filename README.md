@@ -14,11 +14,12 @@
 Portfolio backend yang meniru arsitektur tech-production kelas berat (Uber/Netflix-style) dalam satu repo yang runnable lokal:
 
 - **Event-driven** — domain events mengalir lewat **Kafka**, dikonsumsi worker (consumer group) → audit trail immutable di **MongoDB**, dan fan-out real-time ke **WebSocket** clients
-- **Reliability** — retry dengan exponential backoff + **Dead Letter Queue**, circuit breaker untuk Elasticsearch, graceful shutdown di semua proses
-- **Observability** — **Prometheus** metrics (RED + business counters), **Grafana** dashboard, **OpenTelemetry** tracing ke Jaeger, structured logs dengan request ID
-- **Polyglot persistence** — **PostgreSQL** (source of truth, versioned migrations), **Redis** (cache + rate limiting), **MongoDB** (audit/event store), **Elasticsearch** (full-text search)
+- **Reliability** — retry dengan exponential backoff + **Dead Letter Queue**, circuit breaker untuk search, graceful shutdown di semua proses
+- **Observability** — **Prometheus** metrics (RED + business counters), **Grafana** dashboard, **OpenTelemetry** tracing ke Jaeger, **Loki** log aggregation, structured logs dengan request ID
+- **Polyglot persistence** — **PostgreSQL** (source of truth, versioned migrations), **Redis** (cache + rate limiting), **MongoDB** (audit/event store), **Typesense** (full-text search)
 - **Security** — JWT access/refresh + RBAC roles, Redis sliding-window rate limiter, OWASP security headers, API key gate, Trivy + CodeQL scanning di CI
-- **Delivery** — GitHub Actions (lint → test → race → build → scan → GHCR), Kubernetes manifests + **Helm** chart dengan HPA
+- **Delivery** — GitHub Actions (lint → test → race → build → scan → GHCR), **k3s**-ready Kubernetes manifests + **Helm** chart dengan HPA
+- **Right-sized** — tuned untuk jalan di hardware terbatas (4-core, 8GB RAM): JVM heaps di-cap, observability plane opt-in, load-tested dengan k6
 
 ---
 
@@ -31,8 +32,8 @@ flowchart LR
 
     API --> PG[(PostgreSQL<br/>source of truth)]
     API --> Redis[(Redis<br/>cache + rate limit)]
-    API -->|search| ES[(Elasticsearch)]
-    API -->|index docs| ES
+    API -->|search| TS[(Typesense)]
+    API -->|index docs| TS
 
     API -->|publish product.*| Kafka{{Kafka<br/>products.events}}
 
@@ -49,7 +50,7 @@ flowchart LR
 ```
 
 **Request path** (`POST /api/v1/products`):
-`recover → requestid → OTel tracing → Prometheus RED → security headers → CORS → gzip → timeout → request logger → apikey → rate limit → JWT auth → handler → service → PostgreSQL` → then **async**: cache write, ES index, Kafka publish.
+`recover → requestid → OTel tracing → Prometheus RED → security headers → CORS → gzip → timeout → request logger → apikey → rate limit → JWT auth → handler → service → PostgreSQL` → then **async**: cache write, Typesense index, Kafka publish.
 
 **Event path**: `product.created` → Kafka topic → (1) `worker` group → MongoDB audit, (2) `notifier` group → WebSocket broadcast. Offsets committed **only after** side effects succeed (at-least-once), failures retry 3x with backoff → DLQ.
 
@@ -57,22 +58,24 @@ flowchart LR
 
 ## Tech stack
 
-| Concern            | Choice                                                             |
-| ------------------ | ------------------------------------------------------------------ |
-| Language           | Go **1.25**                                                        |
-| HTTP               | Fiber v2                                                           |
-| DI                 | Uber **fx**                                                        |
-| RDBMS              | PostgreSQL 16 + GORM, migrations via **golang-migrate** (embedded) |
-| Cache / rate limit | Redis 7 + `redis_rate` (Lua sliding window)                        |
-| Event streaming    | **Apache Kafka** (KRaft) via `segmentio/kafka-go`                  |
-| Document store     | **MongoDB 8** (audit trail)                                        |
-| Search             | **Elasticsearch 8** + `gobreaker` circuit breaker                  |
-| Real-time          | WebSocket (`gofiber/websocket`)                                    |
-| Metrics            | Prometheus client (RED + business)                                 |
-| Tracing            | OpenTelemetry OTLP → Jaeger                                        |
-| Auth               | JWT (HS256) access/refresh + role claims (RBAC)                    |
-| CI/CD              | GitHub Actions → GHCR, Trivy, CodeQL, Codecov, Dependabot          |
-| Deploy             | Docker Compose (full stack), Kubernetes manifests, **Helm** chart  |
+| Concern            | Choice                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| Language           | Go **1.25**                                                                                     |
+| HTTP               | Fiber v2                                                                                        |
+| DI                 | Uber **fx**                                                                                     |
+| RDBMS              | PostgreSQL 16 + GORM, migrations via **golang-migrate** (embedded)                              |
+| Cache / rate limit | Redis 7 + `redis_rate` (Lua sliding window)                                                     |
+| Event streaming    | **Apache Kafka** (KRaft) via `segmentio/kafka-go`                                               |
+| Document store     | **MongoDB 8** (audit trail)                                                                     |
+| Search             | **Typesense** + `gobreaker` circuit breaker                                                     |
+| Real-time          | WebSocket (`gofiber/websocket`)                                                                 |
+| Metrics            | Prometheus client (RED + business)                                                              |
+| Tracing            | OpenTelemetry OTLP → Jaeger                                                                     |
+| Logs               | Loki + Promtail (Docker service discovery, zero per-service config)                             |
+| Auth               | JWT (HS256) access/refresh + role claims (RBAC)                                                 |
+| CI/CD              | GitHub Actions → GHCR, Trivy, CodeQL, Codecov, Dependabot                                       |
+| Load testing       | k6 (smoke + ramping load, run via Docker)                                                       |
+| Deploy             | Docker Compose (core + opt-in observability profile), **k3s** + **Helm** chart for the app tier |
 
 ---
 
@@ -84,13 +87,18 @@ flowchart LR
 cp .env.example .env
 ```
 
-### 2. Run everything (one command)
+### 2. Run the core stack
 
 ```bash
-make docker-up
+make docker-up      # api, worker, kafka, typesense
 ```
 
-Boots: PostgreSQL, Redis, Kafka, MongoDB, Elasticsearch, Prometheus, Grafana, Jaeger, API, worker.
+Postgres/Redis/MongoDB are expected to already be running elsewhere on the `shared-net` Docker network (see `docker-compose.yml`). Observability (Prometheus, Grafana, Jaeger, Loki) is **opt-in** — it's a real chunk of RAM/CPU that doesn't need to run 24/7:
+
+```bash
+make obs-up          # prometheus, grafana, jaeger, loki, promtail
+make obs-down        # stop them when you're done looking
+```
 
 ### 3. Explore
 
@@ -186,13 +194,14 @@ internal/
   domain/              Entities, sentinel errors, error codes
   middleware/          auth, rbac, apikey, ratelimit, security, timeout, tracing, logger
   metrics/             Prometheus RED + business metrics
-  platform/            postgres, redis, kafka, mongo, elasticsearch, telemetry
+  platform/            postgres, redis, kafka, mongo, typesense, telemetry
   server/              Fiber app assembly (middleware order lives here)
 migrations/            Versioned SQL (embedded into binaries)
 pkg/response/          JSON envelope + validation binder
-deploy → k8s/          Raw manifests (deployment, service, HPA, probes)
-helm/golang-be/        Helm chart (api + worker + HPA)
-docker/                Prometheus config + Grafana provisioning
+deploy → k8s/          Raw manifests (deployment, service, ingress, HPA, probes) — app tier only, k3s-ready
+helm/golang-be/        Helm chart (api + worker + HPA + ingress)
+docker/                Prometheus, Grafana, Loki, Promtail config
+load/                  k6 smoke + ramping load test scripts
 docs/                  OpenAPI + Swagger UI
 test/                  unit/ integration/ mocks/ testutil/
 .github/               CI, CodeQL, release, Dependabot
@@ -214,6 +223,18 @@ Testing philosophy: unit tests are black-box with in-memory repositories; integr
 
 ---
 
+## Load testing
+
+```bash
+make docker-up       # core stack must be running first
+make load-smoke      # 1 VU, sanity check the happy path
+make load-test       # ramping 5→15 VUs — finds THIS box's realistic ceiling
+```
+
+Runs via the `grafana/k6` Docker image (no local install). Thresholds are deliberately loose for weak hardware, and 429s under load are **expected** — that's the Redis rate limiter doing its job, not a bug. See [`load/load-test.js`](load/load-test.js).
+
+---
+
 ## CI/CD
 
 | Workflow                                       | Trigger        | What it does                                                                                                             |
@@ -227,12 +248,17 @@ Testing philosophy: unit tests are black-box with in-memory repositories; integr
 
 ## Kubernetes & Helm
 
-Raw manifests in [`k8s/`](k8s/): namespace, configmap, secret template, api/worker deployments (non-root, resource limits, liveness/readiness probes, preStop drain), ClusterIP service, and an **HPA** (2→10 pods on CPU 70%).
+**Runs on [k3s](https://k3s.io), not full kubeadm** — a real kubeadm control plane (etcd + apiserver + controller-manager + scheduler) easily costs 1.5-2GB RAM before a single workload runs, and etcd's fsync latency punishes SATA SSDs. k3s replaces etcd with SQLite and ships Traefik + a lightweight metrics-server out of the box, for a fraction of the footprint.
+
+**The cluster only runs the stateless app tier** (`api` + `worker`) — that's where Kubernetes earns its keep (rolling updates, self-healing, HPA). Postgres/Redis/Kafka/MongoDB/Typesense stay on Docker Compose on the same box; running single-instance stateful services in k8s buys nothing on one node and costs more overhead than Compose.
+
+Raw manifests in [`k8s/`](k8s/): namespace, configmap (point `HOST_IP` at the box's LAN IP), secret template, api/worker deployments (non-root, resource limits, liveness/readiness probes, preStop drain), ClusterIP service, Traefik **Ingress**, and an **HPA** (2→4 pods on CPU 70% — capped to match 4 physical cores).
 
 ```bash
 kubectl apply -f k8s/
 # or
-helm install golang-be ./helm/golang-be -n golang-be --create-namespace
+helm install golang-be ./helm/golang-be -n golang-be --create-namespace \
+  --set config.hostIP=192.168.1.50
 ```
 
 Worker replicas double as a **Kafka consumer group** — scaling the deployment scales partition consumption for free.
@@ -243,7 +269,7 @@ Worker replicas double as a **Kafka consumer group** — scaling the deployment 
 
 - **Migrations over AutoMigrate** — schema changes are reviewed, ordered, reversible SQL files embedded in the binary and applied on boot.
 - **At-least-once + idempotent sink** — offsets commit only after Mongo write; `eventId` unique index makes redeliveries harmless.
-- **Circuit breaker on search** — Elasticsearch can die without taking the API down (503 on `/search`, CRUD unaffected).
+- **Circuit breaker on search** — Typesense can die without taking the API down (503 on `/search`, CRUD unaffected).
 - **Fail-open rate limiter** — a Redis hiccup never blocks traffic; limits resume when Redis recovers.
 - **Detached async side effects** — event publishing/indexing run in timeout-bounded goroutines; request latency never includes broker round-trips.
 - **Config validation at boot** — a misconfigured process panics at startup with every invalid field listed, never at 3 AM in production.

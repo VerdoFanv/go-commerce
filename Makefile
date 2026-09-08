@@ -25,24 +25,30 @@ tidy: deps ## Alias for deps
 
 ## ---- Infrastructure ----
 
-.PHONY: infra-up infra-down docker-up docker-down docker-build docker-logs
-infra-up: ## Start only infra containers (postgres, redis, kafka, mongo, es, observability)
-	docker compose up -d postgres redis kafka mongodb elasticsearch prometheus grafana jaeger
+.PHONY: infra-up infra-down docker-up docker-down docker-build docker-logs obs-up obs-down
+infra-up: ## Start core dependencies only (kafka, typesense) — light enough to run always
+	docker compose up -d kafka typesense
 
-infra-down: ## Stop all containers
-	docker compose down
+infra-down: ## Stop all containers (core + observability)
+	docker compose --profile observability down
 
 docker-build: ## Build api + worker images
 	docker compose build api worker
 
-docker-up: ## Build and start the full stack
+docker-up: ## Build and start core stack (api, worker, kafka, typesense) — NOT observability
 	docker compose up -d --build
 
-docker-down: ## Stop the full stack
+docker-down: ## Stop the core stack
 	docker compose down
 
 docker-logs: ## Tail api + worker logs
 	docker compose logs -f api worker
+
+obs-up: ## Start observability plane (prometheus, grafana, jaeger, loki, promtail) — heavier, opt-in
+	docker compose --profile observability up -d prometheus grafana jaeger loki promtail
+
+obs-down: ## Stop observability plane only
+	docker compose --profile observability stop prometheus grafana jaeger loki promtail
 
 ## ---- Database ----
 
@@ -77,6 +83,22 @@ test-race: ## Run tests with the race detector
 test-cover: ## Run tests and export coverage.html
 	go test -coverprofile=coverage.out ./test/unit/... ./test/integration/...
 	go tool cover -html=coverage.out -o coverage.html
+
+## ---- Load testing (k6 via Docker — no local install needed) ----
+
+K6_IMAGE := grafana/k6:0.54.0
+K6_NET   := golang-be_default
+
+.PHONY: load-smoke load-test
+load-smoke: ## Sanity check the happy path (1 VU, 5 iterations)
+	docker run --rm -i --network $(K6_NET) -v $(PWD)/load:/scripts \
+		-e BASE_URL=http://api:8080 -e API_KEY=dev-api-key \
+		$(K6_IMAGE) run /scripts/smoke.js
+
+load-test: ## Ramping load test — finds this box's realistic ceiling
+	docker run --rm -i --network $(K6_NET) -v $(PWD)/load:/scripts \
+		-e BASE_URL=http://api:8080 -e API_KEY=dev-api-key \
+		$(K6_IMAGE) run /scripts/load-test.js
 
 ## ---- Quality ----
 

@@ -2,38 +2,16 @@ name: golang-be
 
 services:
   # ---------- Data plane ----------
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: golang_be
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d golang_be"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   # Kafka in KRaft mode — no Zookeeper needed.
   kafka:
     image: apache/kafka:3.9.0
+    mem_limit: 768m
+    cpus: 1.5
     ports:
       - "9092:9092"
     environment:
+      # Default JVM heap is 1G — overkill for a single-broker dev setup on weak hardware.
+      KAFKA_HEAP_OPTS: "-Xms384m -Xmx384m"
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
@@ -56,45 +34,27 @@ services:
       timeout: 10s
       retries: 12
 
-  mongodb:
-    image: mongo:8
+  typesense:
+    image: typesense/typesense:30.2
+    restart: unless-stopped
+    mem_limit: 300m
+    cpus: 0.5
     ports:
-      - "27017:27017"
+      - "8108:8108"
     volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test:
-        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      - typesense_data:/data
+    command: "--data-dir /data --api-key=dev-typesense-dev"
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: "false"
-      ES_JAVA_OPTS: -Xms256m -Xmx256m
-    ports:
-      - "9200:9200"
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -sf http://localhost:9200/_cluster/health > /dev/null",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  # ---------- Observability plane ----------
+  # ---------- Observability plane (opt-in: `docker compose --profile observability up -d`) ----------
+  # Off by default — three extra JVM/Go processes the weak CPU doesn't need running 24/7.
   prometheus:
     image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    mem_limit: 256m
+    cpus: 0.5
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.time=3d
     ports:
       - "9090:9090"
     volumes:
@@ -102,6 +62,9 @@ services:
 
   grafana:
     image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    mem_limit: 200m
+    cpus: 0.5
     ports:
       - "3000:3000"
     environment:
@@ -117,47 +80,69 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:1.62
+    profiles: ["observability"]
+    mem_limit: 250m
+    cpus: 0.5
     ports:
       - "16686:16686" # UI
       - "4317:4317" # OTLP gRPC
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
 
+  # Third observability pillar: logs. Single-binary filesystem storage — no
+  # object store needed for a one-node dev/portfolio deployment.
+  loki:
+    image: grafana/loki:3.3.0
+    profiles: ["observability"]
+    mem_limit: 200m
+    cpus: 0.5
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+
+  # Tails every container's logs via the Docker API — zero per-service config.
+  promtail:
+    image: grafana/promtail:3.3.0
+    profiles: ["observability"]
+    mem_limit: 128m
+    cpus: 0.3
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./docker/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
   # ---------- Application plane ----------
   api:
     build:
       context: .
       target: api
+    mem_limit: 150m
+    cpus: 1.0
     ports:
       - "8080:8080"
     env_file:
       - .env
-    environment:
-      APP_ENV: development
-      DB_HOST: postgres
-      REDIS_ADDR: redis:6379
-      KAFKA_BROKERS: kafka:29092
-      MONGO_URI: mongodb://mongodb:27017
-      ELASTICSEARCH_ADDR: http://elasticsearch:9200
-      OTEL_ENABLED: ${OTEL_ENABLED:-false}
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
       kafka:
         condition: service_healthy
-      mongodb:
+      typesense:
         condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
+    networks:
+      - default
+      - shared-net
     restart: unless-stopped
 
   worker:
     build:
       context: .
       target: worker
+    mem_limit: 100m
+    cpus: 0.5
     ports:
       - "2112:2112" # Prometheus metrics
     env_file:
@@ -169,13 +154,18 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      mongodb:
-        condition: service_healthy
+    networks:
+      - default
+      - shared-net
     restart: unless-stopped
 
 volumes:
-  postgres_data:
   kafka_data:
-  mongo_data:
-  es_data:
+  typesense_data:
   grafana_data:
+  loki_data:
+
+networks:
+  default:
+  shared-net:
+    external: true

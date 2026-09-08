@@ -9,7 +9,7 @@ spec:
     kind: Deployment
     name: api
   minReplicas: 2
-  maxReplicas: 10
+  maxReplicas: 4 # 4 physical cores total, shared with the Compose data tier — realistic ceiling
   metrics:
     - type: Resource
       resource:

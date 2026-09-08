@@ -5,7 +5,7 @@ info:
     Production-grade REST API dengan event-driven architecture.
 
     Stack: Fiber, PostgreSQL (versioned migrations), Redis, Kafka (event streaming + DLQ),
-    MongoDB (audit trail), Elasticsearch (full-text search), Prometheus, OpenTelemetry.
+    MongoDB (audit trail), Typesense (full-text search), Prometheus, OpenTelemetry.
 
     Envelope response mengikuti kontrak:
     `{ success, message, errorCode?, data, meta? }`.
@@ -60,7 +60,7 @@ paths:
                     postgres: ok
                     redis: ok
                     mongo: ok
-                    elasticsearch: ok
+                    typesense: ok
         "503":
           $ref: "#/components/responses/Error"
 
@@ -221,7 +221,7 @@ paths:
   /api/v1/products/search:
     get:
       tags: [Products]
-      summary: Full-text search (Elasticsearch)
+      summary: Full-text search (Typesense)
       description: Multi-match over name + description with fuzziness. 503 with errorCode `SERVICE_UNAVAILABLE` when search is disabled.
       security:
         - ApiKeyAuth: []

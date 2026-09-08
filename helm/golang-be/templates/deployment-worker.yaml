@@ -35,9 +35,9 @@ spec:
             - name: APP_ENV
               value: {{ .Values.global.env | quote }}
             - name: KAFKA_BROKERS
-              value: {{ .Values.config.kafkaBrokers | quote }}
+              value: {{ printf "%s:9092" .Values.config.hostIP | quote }}
             - name: MONGO_URI
-              value: {{ .Values.config.mongoURI | quote }}
+              value: {{ printf "mongodb://%s:27017" .Values.config.hostIP | quote }}
             - name: METRICS_PORT
               value: {{ .Values.worker.metricsPort | quote }}
           envFrom:

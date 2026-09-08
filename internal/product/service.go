@@ -12,9 +12,9 @@ import (
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/metrics"
-	"github.com/verdofanv/golang-be/internal/platform/elasticsearch"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
+	"github.com/verdofanv/golang-be/internal/platform/typesense"
 )
 
 // EventPublisher is satisfied by *kafka.Producer (prod) and test fakes.
@@ -22,11 +22,11 @@ type EventPublisher interface {
 	Publish(ctx context.Context, key string, event kafka.Event) error
 }
 
-// SearchEngine is satisfied by *elasticsearch.Client (prod) and test fakes.
+// SearchEngine is satisfied by *typesense.Client (prod) and test fakes.
 type SearchEngine interface {
 	IndexProduct(ctx context.Context, p domain.Product) error
 	DeleteProduct(ctx context.Context, id uint) error
-	Search(ctx context.Context, query string, limit int) ([]elasticsearch.ProductDocument, error)
+	Search(ctx context.Context, query string, limit int) ([]typesense.ProductDocument, error)
 }
 
 // Service holds business rules. Every dependency behind an interface is
@@ -213,9 +213,9 @@ func (s *Service) Delete(ctx context.Context, userID uint, role string, id uint)
 	return nil
 }
 
-// Search delegates full-text queries to Elasticsearch. When search is disabled
+// Search delegates full-text queries to typesense. When search is disabled
 // (no ES configured) the handler surfaces 503 — an honest degradation.
-func (s *Service) Search(ctx context.Context, query string, limit int) ([]elasticsearch.ProductDocument, error) {
+func (s *Service) Search(ctx context.Context, query string, limit int) ([]typesense.ProductDocument, error) {
 	if s.search == nil {
 		return nil, domain.ErrUnavailable
 	}

@@ -7,9 +7,9 @@ metadata:
     app: worker
     app.kubernetes.io/name: golang-be
 spec:
-  # Worker replicas form a Kafka consumer group: partitions are assigned
-  # across pods, so scaling out increases parallelism automatically.
-  replicas: 2
+  # Single node, single physical box: one replica is the realistic default.
+  # Bump to 2 only to demo Kafka consumer-group rebalancing.
+  replicas: 1
   selector:
     matchLabels:
       app: worker

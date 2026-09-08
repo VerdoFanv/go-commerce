@@ -22,11 +22,11 @@ api:
   autoscaling:
     enabled: true
     minReplicas: 2
-    maxReplicas: 10
+    maxReplicas: 4 # 4 physical cores total, shared with the Compose data tier
     targetCPUUtilization: 70
 
 worker:
-  replicaCount: 2
+  replicaCount: 1 # single node — bump to 2 only to demo consumer-group rebalancing
   metricsPort: 2112
   resources:
     requests:
@@ -36,15 +36,19 @@ worker:
       cpu: 300m
       memory: 192Mi
 
+# This cluster (k3s) runs only the stateless app tier. Postgres, Redis, Kafka,
+# MongoDB, and Typesense stay on Docker Compose on the SAME physical host —
+# set hostIP to that host's LAN IP (`hostname -I | awk '{print $1}'`).
 config:
-  dbHost: postgres.database.svc.cluster.local
+  hostIP: "HOST_IP"
   dbName: golang_be
-  redisAddr: redis-master.cache.svc.cluster.local:6379
-  kafkaBrokers: kafka.messaging.svc.cluster.local:9092
-  mongoURI: mongodb://mongodb.database.svc.cluster.local:27017
-  elasticsearchAddr: http://elasticsearch-master.database.svc.cluster.local:9200
-  otelEndpoint: otel-collector.observability.svc.cluster.local:4317
+  otelEnabled: false
   rateLimitMax: "100"
+
+ingress:
+  enabled: true
+  className: traefik # built into k3s by default
+  host: golang-be.local
 
 # Secrets are NOT managed by this chart — use external-secrets/sealed-secrets.
 existingSecret: golang-be-secret

@@ -4,24 +4,29 @@ metadata:
   name: golang-be-config
   namespace: golang-be
 data:
+  # This cluster (k3s) runs only the stateless app tier. Postgres, Redis,
+  # Kafka, MongoDB, and Typesense stay on Docker Compose on the SAME host —
+  # replace HOST_IP with that host's LAN IP (`hostname -I | awk '{print $1}'`).
+  # Pods reach host-published ports via the real interface, not 127.0.0.1.
   APP_ENV: "production"
   APP_PORT: "8080"
   LOG_LEVEL: "info"
-  DB_HOST: "postgres.database.svc.cluster.local"
+  DB_HOST: "HOST_IP"
   DB_PORT: "5432"
   DB_NAME: "golang_be"
-  DB_SSLMODE: "require"
-  REDIS_ADDR: "redis-master.cache.svc.cluster.local:6379"
-  KAFKA_BROKERS: "kafka.messaging.svc.cluster.local:9092"
+  DB_SSLMODE: "disable"
+  REDIS_ADDR: "HOST_IP:6379"
+  KAFKA_BROKERS: "HOST_IP:9092"
   KAFKA_TOPIC_PRODUCTS: "products.events"
   KAFKA_TOPIC_DLQ: "products.events.dlq"
   KAFKA_GROUP_WORKER: "golang-be-worker"
   KAFKA_GROUP_NOTIFIER: "golang-be-notifier"
-  MONGO_URI: "mongodb://mongodb.database.svc.cluster.local:27017"
+  MONGO_URI: "mongodb://HOST_IP:27017"
   MONGO_DB: "golang_be_audit"
-  ELASTICSEARCH_ADDR: "http://elasticsearch-master.database.svc.cluster.local:9200"
-  OTEL_ENABLED: "true"
-  OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector.observability.svc.cluster.local:4317"
+  TYPESENSE_ADDR: "http://HOST_IP:8108"
+  # Tracing is opt-in (matches the `observability` compose profile).
+  OTEL_ENABLED: "false"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "HOST_IP:4317"
   RATE_LIMIT_MAX: "100"
   RATE_LIMIT_WINDOW: "1m"
   REQUEST_TIMEOUT: "10s"

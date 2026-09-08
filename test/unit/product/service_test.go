@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/verdofanv/golang-be/internal/domain"
-	"github.com/verdofanv/golang-be/internal/platform/elasticsearch"
+	"github.com/verdofanv/golang-be/internal/platform/typesense"
 	"github.com/verdofanv/golang-be/internal/product"
 	"github.com/verdofanv/golang-be/test/mocks"
 	"github.com/verdofanv/golang-be/test/testutil"
@@ -138,7 +138,7 @@ func TestList_CursorPagination(t *testing.T) {
 	}
 }
 
-func TestSearch_DisabledWithoutElasticsearch(t *testing.T) {
+func TestSearch_DisabledWithoutSearchEngine(t *testing.T) {
 	svc, _ := newService() // search engine nil
 	_, err := svc.Search(context.Background(), "kopi", 20)
 	require.ErrorIs(t, err, domain.ErrUnavailable)
@@ -151,12 +151,12 @@ func TestSearch_EmptyQuery(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalid)
 }
 
-// fakeSearchEngine satisfies product.SearchEngine without Elasticsearch.
+// fakeSearchEngine satisfies product.SearchEngine without Typesense.
 type fakeSearchEngine struct{}
 
 func (f *fakeSearchEngine) IndexProduct(context.Context, domain.Product) error { return nil }
 func (f *fakeSearchEngine) DeleteProduct(context.Context, uint) error          { return nil }
-func (f *fakeSearchEngine) Search(_ context.Context, _ string, _ int) ([]elasticsearch.ProductDocument, error) {
+func (f *fakeSearchEngine) Search(_ context.Context, _ string, _ int) ([]typesense.ProductDocument, error) {
 	return nil, nil
 }
 

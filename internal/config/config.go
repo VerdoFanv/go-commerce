@@ -39,7 +39,8 @@ type Config struct {
 	MongoDB  string `validate:"required"`
 
 	// Optional: when empty, product search is disabled.
-	ElasticsearchAddr string `validate:"omitempty,url"`
+	TypesenseAddr string `validate:"omitempty,url"`
+	TypesenseAPIKey string `validate:"omitempty,url"`
 
 	OTELEnabled  bool
 	OTelEndpoint string `validate:"omitempty,hostname_port"`
@@ -99,7 +100,8 @@ func Load() Config {
 		MongoURI: env("MONGO_URI", "mongodb://localhost:27017"),
 		MongoDB:  env("MONGO_DB", "golang_be_audit"),
 
-		ElasticsearchAddr: env("ELASTICSEARCH_ADDR", "http://localhost:9200"),
+		TypesenseAddr: env("TYPESENSE_ADDR", "http://typesense:8108"),
+		TypesenseAPIKey: env("TYPESENSE_API_KEY", "dev-typesense-key"),
 
 		OTELEnabled:  envBool("OTEL_ENABLED", false),
 		OTelEndpoint: env("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
