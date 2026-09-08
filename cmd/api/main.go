@@ -12,21 +12,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/verdofanv/golang-be/internal/worker/audit"
-	"github.com/verdofanv/golang-be/internal/http/auth"
 	"github.com/verdofanv/golang-be/internal/config"
+	"github.com/verdofanv/golang-be/internal/http/auth"
 	"github.com/verdofanv/golang-be/internal/http/health"
 	"github.com/verdofanv/golang-be/internal/http/lab"
 	"github.com/verdofanv/golang-be/internal/http/notify"
-	"github.com/verdofanv/golang-be/internal/platform/database"
-	"github.com/verdofanv/golang-be/internal/platform/kafka"
-	"github.com/verdofanv/golang-be/internal/platform/mongo"
-	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
-	"github.com/verdofanv/golang-be/internal/platform/telemetry"
-	"github.com/verdofanv/golang-be/internal/platform/typesense"
+	"github.com/verdofanv/golang-be/internal/http/order"
 	"github.com/verdofanv/golang-be/internal/http/product"
 	"github.com/verdofanv/golang-be/internal/http/server"
 	"github.com/verdofanv/golang-be/internal/http/wishlist"
+	"github.com/verdofanv/golang-be/internal/platform/database"
+	"github.com/verdofanv/golang-be/internal/platform/kafka"
+	"github.com/verdofanv/golang-be/internal/platform/mongo"
+	"github.com/verdofanv/golang-be/internal/platform/outbox"
+	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
+	"github.com/verdofanv/golang-be/internal/platform/telemetry"
+	"github.com/verdofanv/golang-be/internal/platform/typesense"
+	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 )
@@ -50,6 +52,11 @@ func main() {
 		}),
 		fx.Provide(func(cfg config.Config) *kafka.Consumer {
 			return kafka.NewConsumer(cfg, cfg.KafkaTopicProducts, cfg.KafkaGroupNotifier)
+		}),
+
+		fx.Provide(outbox.NewWriter),
+		fx.Provide(func(db *gorm.DB, p *kafka.Producer) *outbox.Relay {
+			return outbox.NewRelay(db, p)
 		}),
 
 		fx.Provide(func(p *kafka.Producer) product.EventPublisher { return p }),
@@ -80,6 +87,11 @@ func main() {
 			return wishlist.NewService(repo, products, cache, cfg)
 		}),
 		fx.Provide(wishlist.NewHandler),
+
+		fx.Provide(order.NewRepository),
+		fx.Provide(order.NewService),
+		fx.Provide(order.NewHandler),
+
 		fx.Provide(lab.NewService),
 		fx.Provide(lab.NewHandler),
 
@@ -113,9 +125,11 @@ func registerLifecycle(
 	producer *kafka.Producer,
 	consumer *kafka.Consumer,
 	notifier *notify.Notifier,
+	relay *outbox.Relay,
 	tel *telemetry.Provider,
 ) {
 	notifierCtx, stopNotifier := context.WithCancel(context.Background())
+	relayCtx, stopRelay := context.WithCancel(context.Background())
 
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
@@ -128,6 +142,7 @@ func registerLifecycle(
 			}
 
 			go notifier.Run(notifierCtx)
+			go relay.Run(relayCtx)
 
 			go func() {
 				slog.Info("api listening", "addr", httpServer.Addr, "env", cfg.AppEnv)
@@ -140,6 +155,7 @@ func registerLifecycle(
 		OnStop: func(ctx context.Context) error {
 			slog.Info("shutting down api")
 			stopNotifier()
+			stopRelay()
 
 			if err := httpServer.Shutdown(ctx); err != nil {
 				slog.Warn("http shutdown", "err", err)

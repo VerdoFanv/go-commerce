@@ -28,13 +28,17 @@ golang-be/
 │   │   ├── auth/            # register/login/refresh/me
 │   │   ├── product/         # CRUD + cache + Kafka + search
 │   │   ├── wishlist/        # wishlist + Redis count
-│   │   ├── lab/             # endpoint belajar infra
+│   │   ├── order/           # commerce: stock hold, pay, cancel, outbox
+│   │   ├── lab/             # endpoint belajar infra + failure matrix
 │   │   └── notify/          # WebSocket hub + notifier consumer
 │   ├── worker/              ★ worker only
-│   │   └── audit/           # consume → Mongo + DLQ
+│   │   ├── audit/           # consume → Mongo + DLQ
+│   │   ├── payment/         # order.created → simulate pay
+│   │   ├── inventory/       # commit/release reservations
+│   │   └── dispatch/        # route events → handlers + audit
 │   ├── domain/              # entity + error bersama
 │   ├── config/              # baca env
-│   ├── platform/            # adapter DB/Redis/Kafka/...
+│   ├── platform/            # adapter DB/Redis/Kafka/... + outbox
 │   └── metrics/             # Prometheus
 ├── pkg/response/            # envelope JSON API
 ├── migrations/              # SQL versioned

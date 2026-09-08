@@ -1,7 +1,5 @@
-// Command worker is the event consumer: it reads product domain events from a
-// Kafka consumer group, persists an immutable audit trail to MongoDB, retries
-// failures with exponential backoff, and dead-letters poison messages.
-// It also exposes /metrics on METRICS_PORT for Prometheus scraping.
+// Command worker is the event consumer: audit trail, payment simulation, and
+// inventory commit/release. Offsets commit only after handlers succeed.
 package main
 
 import (
@@ -13,12 +11,18 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/metrics"
+	"github.com/verdofanv/golang-be/internal/platform/database"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 	"github.com/verdofanv/golang-be/internal/platform/mongo"
+	"github.com/verdofanv/golang-be/internal/platform/outbox"
+	"github.com/verdofanv/golang-be/internal/worker/audit"
+	"github.com/verdofanv/golang-be/internal/worker/dispatch"
+	"github.com/verdofanv/golang-be/internal/worker/inventory"
+	"github.com/verdofanv/golang-be/internal/worker/payment"
 	"go.uber.org/fx"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -27,12 +31,14 @@ func main() {
 	fx.New(
 		fx.Provide(config.Load),
 
+		fx.Provide(database.Connect),
 		fx.Provide(mongo.Connect),
 		fx.Provide(audit.NewMongoStore),
 		fx.Provide(func(s *audit.MongoStore) audit.Store { return s }),
+		fx.Provide(outbox.NewWriter),
+		fx.Provide(payment.NewHandler),
+		fx.Provide(inventory.NewHandler),
 
-		// Worker consumes the products topic in its own consumer group and
-		// publishes failures to the DLQ topic.
 		fx.Provide(func(cfg config.Config) *kafka.Consumer {
 			return kafka.NewConsumer(cfg, cfg.KafkaTopicProducts, cfg.KafkaGroupWorker)
 		}),
@@ -40,6 +46,7 @@ func main() {
 			return kafka.NewProducer(cfg, cfg.KafkaTopicDLQ)
 		}),
 		fx.Provide(audit.NewProcessor),
+		fx.Provide(dispatch.NewProcessor),
 
 		fx.Invoke(registerLifecycle),
 	).Run()
@@ -48,11 +55,12 @@ func main() {
 func registerLifecycle(
 	lc fx.Lifecycle,
 	cfg config.Config,
+	db *gorm.DB,
 	consumer *kafka.Consumer,
 	dlq *kafka.Producer,
 	mdb *mongo.Client,
 	store *audit.MongoStore,
-	processor *audit.Processor,
+	processor *dispatch.Processor,
 ) {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	metricsSrv := &http.Server{
@@ -70,7 +78,6 @@ func registerLifecycle(
 				return fmt.Errorf("audit indexes: %w", err)
 			}
 
-			// Prometheus scrape endpoint.
 			go func() {
 				slog.Info("worker metrics listening", "addr", metricsSrv.Addr)
 				if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -78,7 +85,6 @@ func registerLifecycle(
 				}
 			}()
 
-			// Consume loop: fetch → process (retry/DLQ inside) → commit offset.
 			go func() {
 				slog.Info("worker consuming", "topic", cfg.KafkaTopicProducts, "group", cfg.KafkaGroupWorker)
 				for {
@@ -93,7 +99,6 @@ func registerLifecycle(
 					}
 
 					if err := processor.Handle(workerCtx, msg); err != nil {
-						// Not committed → Kafka redelivers on rebalance/restart.
 						slog.Error("event processing failed, offset not committed", "err", err)
 						metrics.EventsDeadLettered.Inc()
 						continue
@@ -102,7 +107,7 @@ func registerLifecycle(
 						slog.Warn("offset commit failed", "err", err)
 					}
 					metrics.EventsConsumed.WithLabelValues(msg.Event.Type, "worker").Inc()
-					slog.Info("event audited",
+					slog.Info("event processed",
 						"type", msg.Event.Type,
 						"eventId", msg.Event.ID,
 					)
@@ -122,6 +127,9 @@ func registerLifecycle(
 			}
 			if err := dlq.Close(); err != nil {
 				slog.Warn("kafka dlq producer close", "err", err)
+			}
+			if sqlDB, err := db.DB(); err == nil {
+				_ = sqlDB.Close()
 			}
 			return mdb.Close(ctx)
 		},

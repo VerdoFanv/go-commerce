@@ -22,6 +22,14 @@ func NewMongoStore(client *mongo.Client) *MongoStore {
 
 func (s *MongoStore) Insert(ctx context.Context, record Record) error {
 	_, err := s.client.Collection(collectionName).InsertOne(ctx, record)
+	if err == nil {
+		return nil
+	}
+	// At-least-once Kafka redelivery after a successful insert must ack as success
+	// so the consumer can commit the offset (idempotent audit).
+	if mongodriver.IsDuplicateKeyError(err) {
+		return nil
+	}
 	return err
 }
 

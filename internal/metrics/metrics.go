@@ -49,6 +49,13 @@ var (
 		Help:      "Events sent to the DLQ after exhausting retries.",
 	})
 
+	OutboxPending = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "golangbe",
+		Subsystem: "outbox",
+		Name:      "pending",
+		Help:      "Unpublished transactional outbox rows (lag signal).",
+	})
+
 	WebSocketConnections = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "golangbe",
 		Subsystem: "websocket",

@@ -37,6 +37,12 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
 
 		lab.GET("/typesense", h.typesenseExplore)
 		lab.POST("/typesense/reindex", h.typesenseReindex)
+
+		lab.GET("/commerce/failure-matrix", h.failureMatrix)
+		lab.GET("/outbox/pending", h.outboxPending)
+		lab.POST("/outbox/relay-once", h.outboxRelayOnce)
+		lab.POST("/outbox/pause", h.outboxPause)
+		lab.POST("/outbox/resume", h.outboxResume)
 	}
 }
 
@@ -136,6 +142,37 @@ func (h *Handler) typesenseReindex(c *gin.Context) {
 		return
 	}
 	response.OK(c, "typesense reindex done", data)
+}
+
+func (h *Handler) failureMatrix(c *gin.Context) {
+	response.OK(c, "commerce failure matrix", h.svc.FailureMatrix(c.Request.Context()))
+}
+
+func (h *Handler) outboxPending(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	data, err := h.svc.OutboxPending(c.Request.Context(), limit)
+	if err != nil {
+		mapErr(c, err)
+		return
+	}
+	response.OK(c, "outbox pending", data)
+}
+
+func (h *Handler) outboxRelayOnce(c *gin.Context) {
+	data, err := h.svc.OutboxRelayOnce(c.Request.Context())
+	if err != nil {
+		mapErr(c, err)
+		return
+	}
+	response.OK(c, "outbox relay once", data)
+}
+
+func (h *Handler) outboxPause(c *gin.Context) {
+	response.OK(c, "outbox relay paused", h.svc.OutboxSetPaused(true))
+}
+
+func (h *Handler) outboxResume(c *gin.Context) {
+	response.OK(c, "outbox relay resumed", h.svc.OutboxSetPaused(false))
 }
 
 func parseID(c *gin.Context) (uint, error) {

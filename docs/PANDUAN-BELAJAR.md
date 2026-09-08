@@ -110,9 +110,31 @@ curl -s -X POST http://192.168.0.155/api/v1/lab/typesense/reindex \
 
 ---
 
-## 3. API baru untuk belajar (lab + wishlist)
+## 3. API baru untuk belajar (lab + wishlist + commerce)
 
 Semua butuh `apikey` + JWT (kecuali health/docs).
+
+### Orders — complexity bisnis (outbox, stock, payment)
+
+Detail kode: [`docs/belajar/09-commerce-reliability.md`](belajar/09-commerce-reliability.md)
+
+| Method | Path | Konsep |
+|--------|------|--------|
+| `POST` | `/api/v1/orders` | Idempotency-Key + TX outbox + stock hold |
+| `GET` | `/api/v1/orders` / `/:id` | List / detail |
+| `POST` | `/api/v1/orders/:id/cancel` | State machine + release stock |
+| `POST` | `/api/v1/orders/:id/pay` | Simulator `outcome=success\|fail\|timeout` |
+| `GET` | `/api/v1/lab/commerce/failure-matrix` | Failure matrix hidup |
+| `GET/POST` | `/api/v1/lab/outbox/*` | Pending / pause / resume / relay-once |
+
+```bash
+curl -s -X POST $HOST/api/v1/orders \
+  -H "$APIKEY" -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: demo-$(date +%s)" -H 'Content-Type: application/json' \
+  -d '{"items":[{"productId":1,"qty":1}]}'
+```
+
+Load concurrency: `scripts/load-orders.sh`
 
 ### Wishlist — use case bisnis Postgres + Redis
 
@@ -155,6 +177,9 @@ curl -s -X POST $HOST/api/v1/wishlists \
 | `POST` | `/api/v1/lab/kafka/ping` | Kafka→Worker→Mongo | Publish event `lab.ping` |
 | `GET` | `/api/v1/lab/typesense?q=kopi` | Typesense | Stats + search |
 | `POST` | `/api/v1/lab/typesense/reindex` | PG→Typesense | Rebuild index dari source of truth |
+| `GET` | `/api/v1/lab/commerce/failure-matrix` | commerce | Expected behaviour per failure |
+| `GET` | `/api/v1/lab/outbox/pending` | outbox | Unpublished events (Kafka-safe proof) |
+| `POST` | `/api/v1/lab/outbox/pause\|resume\|relay-once` | outbox | Chaos + manual publish |
 
 Alur belajar recommended (15 menit):
 

@@ -21,6 +21,7 @@ tags:
   - name: Health
   - name: Authentication
   - name: Products
+  - name: Orders
   - name: Realtime
 
 # Health probes & /metrics intentionally sit OUTSIDE /api/v1 — load balancers,
@@ -311,6 +312,118 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+
+  /api/v1/orders:
+    get:
+      tags: [Orders]
+      summary: List my orders
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Order list
+    post:
+      tags: [Orders]
+      summary: Create order (transactional outbox + stock hold)
+      description: |
+        Requires `Idempotency-Key`. Holds inventory and writes `order.created` to
+        `outbox_events` in the same Postgres transaction. Kafka publish is async via outbox relay.
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [productId, qty]
+                    properties:
+                      productId: { type: integer }
+                      qty: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Order created (pending_payment)
+        "409":
+          description: Insufficient stock or idempotency conflict
+
+  /api/v1/orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Get order detail
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Order
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/orders/{id}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancel order (releases held stock)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Cancelled
+        "409":
+          description: Illegal state transition
+
+  /api/v1/orders/{id}/pay:
+    post:
+      tags: [Orders]
+      summary: Simulate payment (success|fail|timeout)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outcome:
+                  type: string
+                  enum: [success, fail, timeout]
+                key:
+                  type: string
+                  description: Payment attempt idempotency key
+      responses:
+        "200":
+          description: Payment applied
+        "503":
+          description: Simulated timeout
 
   /ws/products:
     get:

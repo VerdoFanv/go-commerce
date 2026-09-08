@@ -14,10 +14,11 @@ import (
 	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
+	"github.com/verdofanv/golang-be/internal/http/product"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
+	"github.com/verdofanv/golang-be/internal/platform/outbox"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/platform/typesense"
-	"github.com/verdofanv/golang-be/internal/http/product"
 	"gorm.io/gorm"
 )
 
@@ -44,6 +45,7 @@ type Service struct {
 	audit     AuditReader
 	publisher EventPublisher
 	search    SearchEngine
+	relay     *outbox.Relay
 	cfg       config.Config
 }
 
@@ -53,6 +55,7 @@ func NewService(
 	auditStore AuditReader,
 	publisher EventPublisher,
 	search SearchEngine,
+	relay *outbox.Relay,
 	cfg config.Config,
 ) *Service {
 	return &Service{
@@ -61,6 +64,7 @@ func NewService(
 		audit:     auditStore,
 		publisher: publisher,
 		search:    search,
+		relay:     relay,
 		cfg:       cfg,
 	}
 }
@@ -75,9 +79,10 @@ type Overview struct {
 }
 
 type PostgresSummary struct {
-	Users    int64 `json:"users"`
-	Products int64 `json:"products"`
+	Users     int64 `json:"users"`
+	Products  int64 `json:"products"`
 	Wishlists int64 `json:"wishlists"`
+	Orders    int64 `json:"orders"`
 }
 
 type RedisSummary struct {
@@ -122,7 +127,7 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 }
 
 func (s *Service) PostgresSummary(ctx context.Context) (*PostgresSummary, error) {
-	var users, products, wishlists int64
+	var users, products, wishlists, orders int64
 	if err := s.db.WithContext(ctx).Table("users").Where("deleted_at IS NULL").Count(&users).Error; err != nil {
 		return nil, err
 	}
@@ -132,7 +137,8 @@ func (s *Service) PostgresSummary(ctx context.Context) (*PostgresSummary, error)
 	if err := s.db.WithContext(ctx).Table("wishlists").Count(&wishlists).Error; err != nil {
 		return nil, err
 	}
-	return &PostgresSummary{Users: users, Products: products, Wishlists: wishlists}, nil
+	_ = s.db.WithContext(ctx).Table("orders").Count(&orders).Error
+	return &PostgresSummary{Users: users, Products: products, Wishlists: wishlists, Orders: orders}, nil
 }
 
 type SampleProduct struct {
@@ -361,3 +367,69 @@ func (s *Service) TypesenseReindex(ctx context.Context) (*ReindexResult, error) 
 	}
 	return res, nil
 }
+
+// FailureMatrix documents expected resilience behaviour for the commerce lab.
+func (s *Service) FailureMatrix(_ context.Context) map[string]any {
+	return map[string]any{
+		"lesson": "Replicate large-system failure modes without breaking order durability.",
+		"matrix": []map[string]string{
+			{"failure": "PostgreSQL down", "expected": "API degraded/unavailable; /health/ready fails"},
+			{"failure": "Redis down", "expected": "cache bypass — product/wishlist still work from Postgres"},
+			{"failure": "Kafka down", "expected": "POST /orders still 201; rows sit in outbox_events until relay succeeds"},
+			{"failure": "Typesense down", "expected": "search degraded (circuit breaker); CRUD unaffected"},
+			{"failure": "Worker crash", "expected": "Kafka redelivery; payment/inventory/audit handlers are idempotent"},
+			{"failure": "Duplicate event", "expected": "no double charge / no double stock release (status + unique keys)"},
+			{"failure": "Network timeout", "expected": "relay retries; request timeout middleware bounds HTTP"},
+			{"failure": "Consumer overload", "expected": "lag grows; no data loss (at-least-once + idempotent)"},
+			{"failure": "Pod killed", "expected": "k3s redirects traffic; graceful Shutdown drains in-flight"},
+			{"failure": "DB slow", "expected": "REQUEST_TIMEOUT aborts slow handlers"},
+		},
+		"triggers": map[string]string{
+			"pauseRelay":   "POST /api/v1/lab/outbox/pause — simulate Kafka-unavailable publish path",
+			"resumeRelay":  "POST /api/v1/lab/outbox/resume",
+			"pendingOutbox": "GET /api/v1/lab/outbox/pending",
+			"relayOnce":    "POST /api/v1/lab/outbox/relay-once",
+			"payFail":      "POST /api/v1/orders/:id/pay {\"outcome\":\"fail\"}",
+		},
+	}
+}
+
+func (s *Service) OutboxPending(ctx context.Context, limit int) (map[string]any, error) {
+	if s.relay == nil {
+		return nil, domain.ErrUnavailable
+	}
+	rows, err := s.relay.ListPending(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	n, err := s.relay.PendingCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"pendingCount": n,
+		"paused":       s.relay.Paused(),
+		"items":        rows,
+		"lesson":       "Unpublished outbox rows prove the request stayed safe while Kafka/relay was unavailable.",
+	}, nil
+}
+
+func (s *Service) OutboxRelayOnce(ctx context.Context) (map[string]any, error) {
+	if s.relay == nil {
+		return nil, domain.ErrUnavailable
+	}
+	n, err := s.relay.RelayOnce(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"published": n, "paused": s.relay.Paused()}, nil
+}
+
+func (s *Service) OutboxSetPaused(paused bool) map[string]any {
+	if s.relay == nil {
+		return map[string]any{"ok": false, "error": "relay unavailable"}
+	}
+	s.relay.SetPaused(paused)
+	return map[string]any{"ok": true, "paused": s.relay.Paused()}
+}
+

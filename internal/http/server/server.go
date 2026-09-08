@@ -16,6 +16,7 @@ import (
 	"github.com/verdofanv/golang-be/internal/metrics"
 	"github.com/verdofanv/golang-be/internal/http/middleware"
 	"github.com/verdofanv/golang-be/internal/http/notify"
+	"github.com/verdofanv/golang-be/internal/http/order"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/http/product"
 	"github.com/verdofanv/golang-be/internal/http/wishlist"
@@ -28,6 +29,7 @@ func NewEngine(
 	authH *auth.Handler,
 	productH *product.Handler,
 	wishlistH *wishlist.Handler,
+	orderH *order.Handler,
 	labH *lab.Handler,
 	healthH *health.Handler,
 	notifyH *notify.Handler,
@@ -44,7 +46,7 @@ func NewEngine(
 	engine.Use(middleware.SecurityHeaders())
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
-		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization", "apikey", "X-API-Key"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization", "apikey", "X-API-Key", "Idempotency-Key"},
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 	}))
 	engine.Use(middleware.Timeout(cfg.RequestTimeout))
@@ -80,6 +82,7 @@ func NewEngine(
 	authH.RegisterRoutes(api, cfg.JWTSecret)
 	productH.RegisterRoutes(api, cfg.JWTSecret)
 	wishlistH.RegisterRoutes(api, cfg.JWTSecret)
+	orderH.RegisterRoutes(api, cfg.JWTSecret)
 	labH.RegisterRoutes(api, cfg.JWTSecret)
 
 	notifyH.RegisterRoutes(engine)

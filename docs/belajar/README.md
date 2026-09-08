@@ -14,6 +14,7 @@ Mulai dari sini. Panduan dipecah biar tidak numpuk — baca berurutan, buka file
 | 6 | [06-http-features.md](06-http-features.md) | Auth, product, wishlist, lab, health, notify |
 | 7 | [07-worker.md](07-worker.md) | Audit consumer, retry, DLQ, Mongo store |
 | 8 | [08-alur-end-to-end.md](08-alur-end-to-end.md) | Satu request create product → Kafka → worker + WebSocket |
+| 9 | [09-commerce-reliability.md](09-commerce-reliability.md) | Order/inventory/payment, outbox, idempotency, failure matrix |
 
 ## Ops / lab (terpisah)
 
