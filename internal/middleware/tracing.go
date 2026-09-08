@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -10,61 +10,63 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// fiberCarrier adapts Fiber's header map to OpenTelemetry's TextMapCarrier.
-type fiberCarrier map[string][]string
+type httpHeaderMap map[string][]string
 
-func (fc fiberCarrier) Get(key string) string {
-	values := fc[key]
+func (h httpHeaderMap) Get(key string) string {
+	values := h[key]
 	if len(values) == 0 {
 		return ""
 	}
 	return values[0]
 }
 
-func (fc fiberCarrier) Set(key, value string) { fc[key] = []string{value} }
+func (h httpHeaderMap) Set(key, value string) { h[key] = []string{value} }
 
-func (fc fiberCarrier) Keys() []string {
-	keys := make([]string, 0, len(fc))
-	for k := range fc {
+func (h httpHeaderMap) Keys() []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
 		keys = append(keys, k)
 	}
 	return keys
 }
 
-// Tracing starts a server span per request, extracting any incoming W3C
-// TraceContext so downstream traces join the same distributed trace.
-// With no TracerProvider configured (OTEL_ENABLED=false) spans are no-ops.
-func Tracing(serviceName string) fiber.Handler {
+// Tracing starts a server span per request using W3C TraceContext.
+func Tracing(serviceName string) gin.HandlerFunc {
 	tracer := otel.Tracer(serviceName)
 	propagator := otel.GetTextMapPropagator()
 	if propagator == nil {
 		propagator = propagation.TraceContext{}
 	}
 
-	return func(c *fiber.Ctx) error {
-		ctx := propagator.Extract(c.UserContext(), fiberCarrier(c.GetReqHeaders()))
-		spanName := c.Method() + " " + c.Route().Path
+	return func(c *gin.Context) {
+		carrier := httpHeaderMap(c.Request.Header)
+		ctx := propagator.Extract(c.Request.Context(), carrier)
+
+		route := c.FullPath()
+		if route == "" {
+			route = c.Request.URL.Path
+		}
+		spanName := c.Request.Method + " " + route
 
 		ctx, span := tracer.Start(ctx, spanName,
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				semconv.HTTPRequestMethodKey.String(c.Method()),
-				semconv.URLPath(c.Path()),
+				semconv.HTTPRequestMethodKey.String(c.Request.Method),
+				semconv.URLPath(c.Request.URL.Path),
 			),
 		)
 		defer span.End()
 
-		c.SetUserContext(ctx)
-		err := c.Next()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
 
-		status := c.Response().StatusCode()
+		status := c.Writer.Status()
 		span.SetAttributes(
 			attribute.Int("http.response.status_code", status),
-			attribute.String("http.route", c.Route().Path),
+			attribute.String("http.route", route),
 		)
 		if status >= 500 {
 			span.SetStatus(codes.Error, "server error")
 		}
-		return err
 	}
 }

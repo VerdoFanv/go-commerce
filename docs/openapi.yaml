@@ -4,7 +4,7 @@ info:
   description: |
     Production-grade REST API dengan event-driven architecture.
 
-    Stack: Fiber, PostgreSQL (versioned migrations), Redis, Kafka (event streaming + DLQ),
+    Stack: Gin, PostgreSQL (versioned migrations), Redis, Kafka (event streaming + DLQ),
     MongoDB (audit trail), Typesense (full-text search), Prometheus, OpenTelemetry.
 
     Envelope response mengikuti kontrak:

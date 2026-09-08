@@ -8,15 +8,18 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gin-gonic/gin"
 )
 
-// NewRouter returns a bare Fiber app for handler tests.
-func NewRouter() *fiber.App {
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
-	app.Use(recover.New())
-	return app
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+// NewRouter returns a bare Gin engine for handler tests.
+func NewRouter() *gin.Engine {
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	return engine
 }
 
 type RequestOption func(*http.Request)
@@ -24,12 +27,6 @@ type RequestOption func(*http.Request)
 func WithHeader(key, value string) RequestOption {
 	return func(r *http.Request) {
 		r.Header.Set(key, value)
-	}
-}
-
-func WithJSON(body any) RequestOption {
-	return func(r *http.Request) {
-		r.Header.Set("Content-Type", "application/json")
 	}
 }
 
@@ -41,8 +38,8 @@ func WithAPIKey(key string) RequestOption {
 	return WithHeader("apikey", key)
 }
 
-// DoJSON performs an HTTP request against a Fiber app and returns status + decoded envelope-ish map.
-func DoJSON(t *testing.T, app *fiber.App, method, path string, body any, opts ...RequestOption) (int, map[string]any) {
+// DoJSON performs an HTTP request against a Gin engine and returns status + decoded map.
+func DoJSON(t *testing.T, engine *gin.Engine, method, path string, body any, opts ...RequestOption) (int, map[string]any) {
 	t.Helper()
 
 	var reader io.Reader
@@ -62,24 +59,17 @@ func DoJSON(t *testing.T, app *fiber.App, method, path string, body any, opts ..
 		opt(req)
 	}
 
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("app.Test: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
 
 	var out map[string]any
+	raw := rec.Body.Bytes()
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &out); err != nil {
 			t.Fatalf("unmarshal response: %v\nbody=%s", err, string(raw))
 		}
 	}
-	return resp.StatusCode, out
+	return rec.Code, out
 }
 
 func DecodeData[T any](t *testing.T, envelope map[string]any) T {

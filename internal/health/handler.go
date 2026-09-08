@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/pkg/response"
 )
@@ -29,20 +29,20 @@ func NewHandler(checkers ...Checker) *Handler {
 	return &Handler{checkers: checkers, timeout: 2 * time.Second}
 }
 
-func (h *Handler) RegisterRoutes(rg fiber.Router) {
-	rg.Get("/health/live", h.live)
-	rg.Get("/health/ready", h.ready)
+func (h *Handler) RegisterRoutes(r gin.IRouter) {
+	r.GET("/health/live", h.live)
+	r.GET("/health/ready", h.ready)
 	// Backward-compatible alias: /health == readiness.
-	rg.Get("/health", h.ready)
+	r.GET("/health", h.ready)
 }
 
-// live only proves the event loop responds — no dependency checks.
-func (h *Handler) live(c *fiber.Ctx) error {
-	return response.OK(c, "alive", fiber.Map{"status": "up"})
+// live only proves the server responds — no dependency checks.
+func (h *Handler) live(c *gin.Context) {
+	response.OK(c, "alive", gin.H{"status": "up"})
 }
 
 // ready pings every dependency in parallel; any failure → 503 with detail.
-func (h *Handler) ready(c *fiber.Ctx) error {
+func (h *Handler) ready(c *gin.Context) {
 	results := make(map[string]string, len(h.checkers))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -51,7 +51,7 @@ func (h *Handler) ready(c *fiber.Ctx) error {
 		wg.Add(1)
 		go func(ch Checker) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(c.UserContext(), h.timeout)
+			ctx, cancel := context.WithTimeout(c.Request.Context(), h.timeout)
 			defer cancel()
 
 			status := "ok"
@@ -67,9 +67,10 @@ func (h *Handler) ready(c *fiber.Ctx) error {
 
 	for _, status := range results {
 		if status != "ok" {
-			return response.FailCode(c, http.StatusServiceUnavailable,
+			response.FailCode(c, http.StatusServiceUnavailable,
 				domain.ErrUnavailable.Error(), domain.ErrorCode(domain.ErrUnavailable))
+			return
 		}
 	}
-	return response.OK(c, "ready", fiber.Map{"checks": results})
+	response.OK(c, "ready", gin.H{"checks": results})
 }

@@ -1,6 +1,8 @@
 # Panduan Belajar — Golang BE (API, Worker, Infra, Ops)
 
 Dokumen praktek untuk setup **single-node LAN** (Ubuntu + k3s + Docker Compose).  
+> **Secrets:** password DB/Mongo hanya di `.env` / `k8s/secret.yaml` / compose `infra-db` di server — **jangan** tulis ulang ke git.
+
 Default lab host: **`192.168.0.155`** — ganti jika IP server beda.
 
 Baca sambil praktek. Jangan hanya scroll.
@@ -49,16 +51,16 @@ Opsional di Mac `/etc/hosts`:
 
 | Service | Endpoint | Kredensial |
 |---------|----------|------------|
-| PostgreSQL | `192.168.0.155:5432` | `admin` / `cQ5Fs5ciBO0ZOdk4` — DB app: `golang_be` |
+| PostgreSQL | `192.168.0.155:5432` | `admin` / *(isi dari infra-db compose / `.env` — jangan commit)* — DB app: `golang_be` |
 | Redis | `192.168.0.155:6379` | tanpa password |
-| MongoDB | `192.168.0.155:27017` | `admin` / `rLKK7Lo18d5M82gV` (`authSource=admin`) — DB audit: `golang_be_audit` |
+| MongoDB | `192.168.0.155:27017` | `admin` / *(isi dari infra-db compose / `.env` — jangan commit)* (`authSource=admin`) — DB audit: `golang_be_audit` |
 | Kafka | `192.168.0.155:9092` | plaintext — topics: `products.events`, `products.events.dlq` |
 | Typesense | http://192.168.0.155:8108 | `X-TYPESENSE-API-KEY: dev-typesense-key` |
 
 Mongo URI (Secret k8s):
 
 ```
-mongodb://admin:rLKK7Lo18d5M82gV@192.168.0.155:27017/?authSource=admin
+mongodb://USER:PASS@192.168.0.155:27017/?authSource=admin  # dari .env / k8s secret
 ```
 
 ### Observability (`make obs-up`)
@@ -261,6 +263,29 @@ curl http://192.168.0.155/health/ready
 
 ---
 
+## Zero-downtime deploy (k3s)
+
+Manifest API memakai:
+
+- `replicas: 2`
+- `maxUnavailable: 0` + `maxSurge: 1`
+- `minReadySeconds: 5`
+- readiness `/health/ready` + liveness `/health/live`
+- `preStop sleep 5` + `terminationGracePeriodSeconds: 30`
+- HTTP server graceful `Shutdown` (Gin + `net/http`)
+
+Artinya saat `rollout restart` / ganti image: pod baru harus Ready dulu, baru pod lama di-drain — traffic tidak “bolong” selama ada ≥1 pod Ready.
+
+```bash
+sudo k3s kubectl -n golang-be apply -f k8s/api-deployment.yaml
+sudo k3s kubectl -n golang-be rollout restart deploy/api
+sudo k3s kubectl -n golang-be rollout status deploy/api
+# sambil rollout, dari Mac:
+watch -n1 'curl -s -o /dev/null -w "%{http_code}\n" http://192.168.0.155/health/ready'
+```
+
+---
+
 ## 6. Menjalankan (day-to-day)
 
 ### Cek kesehatan cepat
@@ -319,7 +344,7 @@ docker logs -f golang-be-typesense-1
 docker exec -it postgres-global psql -U admin -d golang_be
 docker exec -it redis-global redis-cli
 docker exec -it mongo-global mongosh \
-  "mongodb://admin:rLKK7Lo18d5M82gV@127.0.0.1:27017/?authSource=admin"
+  "mongodb://$USER:$PASS@127.0.0.1:27017/?authSource=admin"
 ```
 
 ---
@@ -376,7 +401,7 @@ docker exec -i postgres-global psql -U admin -d golang_be < ~/backup-golang_be-Y
 
 ```bash
 docker exec mongo-global mongodump \
-  --uri="mongodb://admin:rLKK7Lo18d5M82gV@127.0.0.1:27017/?authSource=admin" \
+  --uri="mongodb://$USER:$PASS@127.0.0.1:27017/?authSource=admin" \
   --db=golang_be_audit --out=/tmp/mongodump
 
 docker cp mongo-global:/tmp/mongodump ~/mongo-backup-$(date +%F)
@@ -384,7 +409,7 @@ docker cp mongo-global:/tmp/mongodump ~/mongo-backup-$(date +%F)
 # Restore
 docker cp ~/mongo-backup-YYYY-MM-DD mongo-global:/tmp/mongodump
 docker exec mongo-global mongorestore \
-  --uri="mongodb://admin:rLKK7Lo18d5M82gV@127.0.0.1:27017/?authSource=admin" \
+  --uri="mongodb://$USER:$PASS@127.0.0.1:27017/?authSource=admin" \
   /tmp/mongodump
 ```
 

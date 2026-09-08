@@ -6,68 +6,52 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/verdofanv/golang-be/internal/middleware"
 	"github.com/verdofanv/golang-be/test/testutil"
 )
 
+func doReq(engine *gin.Engine, method, path string, headers map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestAPIKey_Missing(t *testing.T) {
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.APIKey("secret"), func(c *fiber.Ctx) error {
-		return c.SendStatus(http.StatusOK)
-	})
+	app.GET("/x", middleware.APIKey("secret"), func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	rec := doReq(app, http.MethodGet, "/x", nil)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestAPIKey_Valid(t *testing.T) {
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.APIKey("secret"), func(c *fiber.Ctx) error {
-		return c.SendStatus(http.StatusOK)
-	})
+	app.GET("/x", middleware.APIKey("secret"), func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	req.Header.Set("apikey", "secret")
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	rec := doReq(app, http.MethodGet, "/x", map[string]string{"apikey": "secret"})
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAPIKey_XAPIKeyHeader(t *testing.T) {
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.APIKey("secret"), func(c *fiber.Ctx) error {
-		return c.SendStatus(http.StatusOK)
-	})
+	app.GET("/x", middleware.APIKey("secret"), func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	req.Header.Set("X-API-Key", "secret")
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	rec := doReq(app, http.MethodGet, "/x", map[string]string{"X-API-Key": "secret"})
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAuth_MissingBearer(t *testing.T) {
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.Auth("secret"), func(c *fiber.Ctx) error {
-		return c.SendStatus(http.StatusOK)
-	})
+	app.GET("/x", middleware.Auth("secret"), func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	rec := doReq(app, http.MethodGet, "/x", nil)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestAuth_ValidAccessToken(t *testing.T) {
@@ -75,20 +59,15 @@ func TestAuth_ValidAccessToken(t *testing.T) {
 	token := testutil.SignAccessToken(t, secret, 42)
 
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.Auth(secret), func(c *fiber.Ctx) error {
+	app.GET("/x", middleware.Auth(secret), func(c *gin.Context) {
 		id, ok := middleware.UserID(c)
 		require.True(t, ok)
 		require.Equal(t, uint(42), id)
-		return c.SendStatus(http.StatusOK)
+		c.Status(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	rec := doReq(app, http.MethodGet, "/x", map[string]string{"Authorization": "Bearer " + token})
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAuth_RefreshTokenRejected(t *testing.T) {
@@ -96,17 +75,10 @@ func TestAuth_RefreshTokenRejected(t *testing.T) {
 	token := testutil.SignRefreshToken(t, secret, 42)
 
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.Auth(secret), func(c *fiber.Ctx) error {
-		return c.SendStatus(http.StatusOK)
-	})
+	app.GET("/x", middleware.Auth(secret), func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	rec := doReq(app, http.MethodGet, "/x", map[string]string{"Authorization": "Bearer " + token})
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestAuth_ExpiredToken(t *testing.T) {
@@ -114,18 +86,11 @@ func TestAuth_ExpiredToken(t *testing.T) {
 	token := testutil.SignExpiredToken(t, secret, 42, "access")
 
 	app := testutil.NewRouter()
-	app.Get("/x", middleware.Auth(secret), func(c *fiber.Ctx) error {
-		return c.SendStatus(http.StatusOK)
-	})
+	app.GET("/x", middleware.Auth(secret), func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	raw, err := io.ReadAll(resp.Body)
+	rec := doReq(app, http.MethodGet, "/x", map[string]string{"Authorization": "Bearer " + token})
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	raw, err := io.ReadAll(rec.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), "Token expired")
 }

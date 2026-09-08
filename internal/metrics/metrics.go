@@ -1,4 +1,4 @@
-// Package metrics defines the Prometheus registry and the Fiber middleware that
+// Package metrics defines the Prometheus registry and Gin middleware that
 // records RED (Rate, Errors, Duration) for every HTTP request, plus custom
 // business counters for the event pipeline.
 package metrics
@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -57,21 +57,19 @@ var (
 	})
 )
 
-// Middleware returns a Fiber handler recording RED metrics per route template
-// (Route().Path, not raw path — avoids cardinality explosion from path params).
-func Middleware() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+// Middleware records RED metrics per route template (FullPath).
+func Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		start := time.Now()
-		err := c.Next()
+		c.Next()
 
-		route := c.Route().Path
+		route := c.FullPath()
 		if route == "" {
 			route = "unmatched"
 		}
-		status := strconv.Itoa(c.Response().StatusCode())
+		status := strconv.Itoa(c.Writer.Status())
 
-		HTTPRequestsTotal.WithLabelValues(c.Method(), route, status).Inc()
-		HTTPRequestDuration.WithLabelValues(c.Method(), route).Observe(time.Since(start).Seconds())
-		return err
+		HTTPRequestsTotal.WithLabelValues(c.Request.Method, route, status).Inc()
+		HTTPRequestDuration.WithLabelValues(c.Request.Method, route).Observe(time.Since(start).Seconds())
 	}
 }

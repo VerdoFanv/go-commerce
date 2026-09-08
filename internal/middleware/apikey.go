@@ -3,25 +3,28 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/pkg/response"
 )
 
 // APIKey gates every route under /api with a shared service key — a first
 // defense layer before any user-level JWT check.
-func APIKey(expected string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+func APIKey(expected string) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		if expected == "" {
-			return c.Next()
+			c.Next()
+			return
 		}
-		key := c.Get("apikey")
+		key := c.GetHeader("apikey")
 		if key == "" {
-			key = c.Get("X-API-Key")
+			key = c.GetHeader("X-API-Key")
 		}
 		if key != expected {
-			return response.FailCode(c, http.StatusUnauthorized, domain.ErrInvalidAPIKey.Error(), domain.ErrorCode(domain.ErrInvalidAPIKey))
+			response.FailCode(c, http.StatusUnauthorized, domain.ErrInvalidAPIKey.Error(), domain.ErrorCode(domain.ErrInvalidAPIKey))
+			c.Abort()
+			return
 		}
-		return c.Next()
+		c.Next()
 	}
 }

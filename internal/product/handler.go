@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/middleware"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -19,15 +19,16 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string) {
-	products := rg.Group("/products", middleware.Auth(jwtSecret))
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
+	products := rg.Group("/products")
+	products.Use(middleware.Auth(jwtSecret))
 	{
-		products.Get("", h.list)
-		products.Get("/search", h.search) // before /:id so "search" never parses as an ID
-		products.Post("", h.create)
-		products.Get("/:id", h.getByID)
-		products.Put("/:id", h.update)
-		products.Delete("/:id", h.delete)
+		products.GET("", h.list)
+		products.GET("/search", h.search) // before /:id so "search" never parses as an ID
+		products.POST("", h.create)
+		products.GET("/:id", h.getByID)
+		products.PUT("/:id", h.update)
+		products.DELETE("/:id", h.delete)
 	}
 }
 
@@ -45,18 +46,20 @@ type updateRequest struct {
 	Stock       *int     `json:"stock"`
 }
 
-func (h *Handler) create(c *fiber.Ctx) error {
+func (h *Handler) create(c *gin.Context) {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		return
 	}
 
 	var req createRequest
 	if err := response.BindJSON(c, &req); err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid request body")
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
-	product, err := h.svc.Create(c.UserContext(), CreateInput{
+	product, err := h.svc.Create(c.Request.Context(), CreateInput{
 		UserID:      userID,
 		Name:        req.Name,
 		Description: req.Description,
@@ -64,28 +67,32 @@ func (h *Handler) create(c *fiber.Ctx) error {
 		Stock:       req.Stock,
 	})
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.Created(c, "product created", product)
+	response.Created(c, "product created", product)
 }
 
-func (h *Handler) list(c *fiber.Ctx) error {
+func (h *Handler) list(c *gin.Context) {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+		response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+		return
 	}
 
 	cursor, err := parseCursor(c.Query("cursor"))
 	if err != nil {
-		return response.FailCode(c, http.StatusBadRequest, "invalid cursor", domain.ErrorCode(domain.ErrInvalid))
+		response.FailCode(c, http.StatusBadRequest, "invalid cursor", domain.ErrorCode(domain.ErrInvalid))
+		return
 	}
-	limit := c.QueryInt("limit", 20)
+	limit := queryInt(c, "limit", 20)
 
-	result, err := h.svc.List(c.UserContext(), userID, cursor, limit)
+	result, err := h.svc.List(c.Request.Context(), userID, cursor, limit)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OKWithMeta(c, "success", result.Items, response.PageMeta{
+	response.OKWithMeta(c, "success", result.Items, response.PageMeta{
 		Limit:      limit,
 		NextCursor: result.NextCursor,
 		HasMore:    result.HasMore,
@@ -93,69 +100,79 @@ func (h *Handler) list(c *fiber.Ctx) error {
 }
 
 // search is the Elasticsearch-backed full-text endpoint: GET /products/search?q=kopi&limit=20
-func (h *Handler) search(c *fiber.Ctx) error {
+func (h *Handler) search(c *gin.Context) {
 	query := c.Query("q")
-	limit := c.QueryInt("limit", 20)
+	limit := queryInt(c, "limit", 20)
 
-	docs, err := h.svc.Search(c.UserContext(), query, limit)
+	docs, err := h.svc.Search(c.Request.Context(), query, limit)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "success", docs)
+	response.OK(c, "success", docs)
 }
 
-func (h *Handler) getByID(c *fiber.Ctx) error {
-	id, err := parseID(c.Params("id"))
+func (h *Handler) getByID(c *gin.Context) {
+	id, err := parseID(c.Param("id"))
 	if err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid id")
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
 	}
 
-	product, err := h.svc.GetByID(c.UserContext(), id)
+	product, err := h.svc.GetByID(c.Request.Context(), id)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "success", product)
+	response.OK(c, "success", product)
 }
 
-func (h *Handler) update(c *fiber.Ctx) error {
+func (h *Handler) update(c *gin.Context) {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		return
 	}
 
-	id, err := parseID(c.Params("id"))
+	id, err := parseID(c.Param("id"))
 	if err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid id")
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
 	}
 
 	var req updateRequest
 	if err := response.BindJSON(c, &req); err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid request body")
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
-	product, err := h.svc.Update(c.UserContext(), userID, id, UpdateInput(req))
+	product, err := h.svc.Update(c.Request.Context(), userID, id, UpdateInput(req))
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "product updated", product)
+	response.OK(c, "product updated", product)
 }
 
-func (h *Handler) delete(c *fiber.Ctx) error {
+func (h *Handler) delete(c *gin.Context) {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+		response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+		return
 	}
 	role, _ := middleware.UserRole(c)
 
-	id, err := parseID(c.Params("id"))
+	id, err := parseID(c.Param("id"))
 	if err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid id")
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
 	}
 
-	if err := h.svc.Delete(c.UserContext(), userID, role, id); err != nil {
-		return mapErr(c, err)
+	if err := h.svc.Delete(c.Request.Context(), userID, role, id); err != nil {
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "product deleted", nil)
+	response.OK(c, "product deleted", nil)
 }
 
 func parseID(raw string) (uint, error) {
@@ -173,20 +190,33 @@ func parseCursor(raw string) (uint, error) {
 	return parseID(raw)
 }
 
-func mapErr(c *fiber.Ctx, err error) error {
+// queryInt reads an int query param, falling back to def when absent or malformed.
+func queryInt(c *gin.Context, key string, def int) int {
+	raw := c.Query(key)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func mapErr(c *gin.Context, err error) {
 	code := domain.ErrorCode(err)
 	switch {
 	case errors.Is(err, domain.ErrInvalid):
-		return response.FailCode(c, http.StatusBadRequest, err.Error(), code)
+		response.FailCode(c, http.StatusBadRequest, err.Error(), code)
 	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrTokenExpired):
-		return response.FailCode(c, http.StatusUnauthorized, err.Error(), code)
+		response.FailCode(c, http.StatusUnauthorized, err.Error(), code)
 	case errors.Is(err, domain.ErrForbidden):
-		return response.FailCode(c, http.StatusForbidden, err.Error(), code)
+		response.FailCode(c, http.StatusForbidden, err.Error(), code)
 	case errors.Is(err, domain.ErrNotFound):
-		return response.FailCode(c, http.StatusNotFound, err.Error(), code)
+		response.FailCode(c, http.StatusNotFound, err.Error(), code)
 	case errors.Is(err, domain.ErrUnavailable):
-		return response.FailCode(c, http.StatusServiceUnavailable, err.Error(), code)
+		response.FailCode(c, http.StatusServiceUnavailable, err.Error(), code)
 	default:
-		return response.FailCode(c, http.StatusInternalServerError, "internal error", code)
+		response.FailCode(c, http.StatusInternalServerError, "internal error", code)
 	}
 }

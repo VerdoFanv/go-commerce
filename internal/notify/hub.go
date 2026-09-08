@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/gofiber/websocket/v2"
+	"github.com/gorilla/websocket"
 	"github.com/verdofanv/golang-be/internal/metrics"
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 )

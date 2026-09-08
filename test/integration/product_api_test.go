@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/verdofanv/golang-be/internal/auth"
 	"github.com/verdofanv/golang-be/internal/middleware"
@@ -13,7 +13,7 @@ import (
 	"github.com/verdofanv/golang-be/test/testutil"
 )
 
-func setupProductAPI() (*fiber.App, string) {
+func setupProductAPI() (*gin.Engine, string) {
 	cfg := testutil.Config()
 
 	authRepo := mocks.NewAuthRepository()
@@ -31,7 +31,7 @@ func setupProductAPI() (*fiber.App, string) {
 	return app, cfg.APIKey
 }
 
-func registerAndLogin(t *testing.T, app *fiber.App, apiKey string) string {
+func registerAndLogin(t *testing.T, app *gin.Engine, apiKey string) string {
 	t.Helper()
 
 	_, body := testutil.DoJSON(t, app, "POST", "/api/v1/authentication/register", map[string]any{

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -24,12 +24,14 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// Auth validates the Bearer token and stores UserID + Role in request locals.
-func Auth(secret string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		header := c.Get("Authorization")
+// Auth validates the Bearer token and stores UserID + Role in gin context.
+func Auth(secret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
-			return unauthorized(c, domain.ErrUnauthorized)
+			unauthorized(c, domain.ErrUnauthorized)
+			c.Abort()
+			return
 		}
 
 		tokenStr := strings.TrimPrefix(header, "Bearer ")
@@ -42,17 +44,23 @@ func Auth(secret string) fiber.Handler {
 		})
 		if err != nil || token == nil || !token.Valid {
 			if err != nil && strings.Contains(err.Error(), "token is expired") {
-				return unauthorized(c, domain.ErrTokenExpired)
+				unauthorized(c, domain.ErrTokenExpired)
+				c.Abort()
+				return
 			}
-			return unauthorized(c, domain.ErrUnauthorized)
+			unauthorized(c, domain.ErrUnauthorized)
+			c.Abort()
+			return
 		}
 		if claims.Type != "" && claims.Type != "access" {
-			return unauthorized(c, domain.ErrUnauthorized)
+			unauthorized(c, domain.ErrUnauthorized)
+			c.Abort()
+			return
 		}
 
-		c.Locals(ContextUserIDKey, claims.UserID)
-		c.Locals(ContextUserRoleKey, claims.Role)
-		return c.Next()
+		c.Set(ContextUserIDKey, claims.UserID)
+		c.Set(ContextUserRoleKey, claims.Role)
+		c.Next()
 	}
 }
 
@@ -68,14 +76,14 @@ func ParseToken(secret, tokenStr string) (*Claims, error) {
 	return claims, nil
 }
 
-func unauthorized(c *fiber.Ctx, err error) error {
-	return response.FailCode(c, http.StatusUnauthorized, err.Error(), domain.ErrorCode(err))
+func unauthorized(c *gin.Context, err error) {
+	response.FailCode(c, http.StatusUnauthorized, err.Error(), domain.ErrorCode(err))
 }
 
 // UserID extracts the authenticated user ID stored by Auth.
-func UserID(c *fiber.Ctx) (uint, bool) {
-	v := c.Locals(ContextUserIDKey)
-	if v == nil {
+func UserID(c *gin.Context) (uint, bool) {
+	v, ok := c.Get(ContextUserIDKey)
+	if !ok {
 		return 0, false
 	}
 	id, ok := v.(uint)
@@ -83,9 +91,9 @@ func UserID(c *fiber.Ctx) (uint, bool) {
 }
 
 // UserRole extracts the authenticated role stored by Auth.
-func UserRole(c *fiber.Ctx) (string, bool) {
-	v := c.Locals(ContextUserRoleKey)
-	if v == nil {
+func UserRole(c *gin.Context) (string, bool) {
+	v, ok := c.Get(ContextUserRoleKey)
+	if !ok {
 		return "", false
 	}
 	role, ok := v.(string)

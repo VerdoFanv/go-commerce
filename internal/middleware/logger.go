@@ -4,31 +4,33 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
-// RequestLogger emits one structured line per request. The request ID comes
-// from the requestid middleware (mounted earlier in the chain) so logs,
-// traces, and client-visible X-Request-ID headers all correlate.
-func RequestLogger() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+// RequestLogger emits one structured line per request.
+func RequestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		start := time.Now()
-		err := c.Next()
+		c.Next()
 
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
 		attrs := []any{
-			"requestId", c.GetRespHeader(fiber.HeaderXRequestID),
-			"method", c.Method(),
-			"path", c.Path(),
-			"route", c.Route().Path,
-			"status", c.Response().StatusCode(),
-			"ip", c.IP(),
+			"requestId", c.Writer.Header().Get("X-Request-ID"),
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"route", route,
+			"status", c.Writer.Status(),
+			"ip", c.ClientIP(),
 			"duration", time.Since(start).String(),
 		}
 		if userID, ok := UserID(c); ok {
 			attrs = append(attrs, "userId", userID)
 		}
 
-		status := c.Response().StatusCode()
+		status := c.Writer.Status()
 		switch {
 		case status >= 500:
 			slog.Error("request", attrs...)
@@ -37,6 +39,5 @@ func RequestLogger() fiber.Handler {
 		default:
 			slog.Info("request", attrs...)
 		}
-		return err
 	}
 }

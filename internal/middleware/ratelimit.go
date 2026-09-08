@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis_rate/v10"
-	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -18,32 +18,32 @@ type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit redis_rate.Limit) (*redis_rate.Result, error)
 }
 
-// RateLimit applies a per-IP sliding-window limit backed by Redis (Lua script,
-// atomic across replicas). When the limiter is nil (tests, Redis outage at
-// boot) the middleware is a pass-through — availability beats strictness here.
-func RateLimit(limiter RateLimiter, max int, window time.Duration) fiber.Handler {
+// RateLimit applies a per-IP sliding-window limit backed by Redis.
+func RateLimit(limiter RateLimiter, max int, window time.Duration) gin.HandlerFunc {
 	if limiter == nil {
-		return func(c *fiber.Ctx) error { return c.Next() }
+		return func(c *gin.Context) { c.Next() }
 	}
 	limit := redis_rate.Limit{Rate: max, Burst: max, Period: window}
 
-	return func(c *fiber.Ctx) error {
-		res, err := limiter.Allow(c.UserContext(), "rl:"+c.IP(), limit)
+	return func(c *gin.Context) {
+		res, err := limiter.Allow(c.Request.Context(), "rl:"+c.ClientIP(), limit)
 		if err != nil {
-			// Redis hiccup → fail open, log upstream via metrics if needed.
-			return c.Next()
+			c.Next()
+			return
 		}
 
-		c.Set("X-RateLimit-Limit", itoa(res.Limit.Rate))
-		c.Set("X-RateLimit-Remaining", itoa(res.Remaining))
-		c.Set("X-RateLimit-Reset", itoa(int(res.ResetAfter.Seconds())))
+		c.Header("X-RateLimit-Limit", itoa(res.Limit.Rate))
+		c.Header("X-RateLimit-Remaining", itoa(res.Remaining))
+		c.Header("X-RateLimit-Reset", itoa(int(res.ResetAfter.Seconds())))
 
 		if res.Allowed == 0 {
-			c.Set("Retry-After", itoa(int(res.RetryAfter.Seconds())+1))
-			return response.FailCode(c, http.StatusTooManyRequests,
+			c.Header("Retry-After", itoa(int(res.RetryAfter.Seconds())+1))
+			response.FailCode(c, http.StatusTooManyRequests,
 				domain.ErrRateLimited.Error(), domain.ErrorCode(domain.ErrRateLimited))
+			c.Abort()
+			return
 		}
-		return c.Next()
+		c.Next()
 	}
 }
 

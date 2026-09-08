@@ -9,15 +9,16 @@ RESTful backend dengan **clean architecture**, event-driven (Kafka), polyglot pe
 
 ## Stack
 
-- **Fiber** — HTTP router
+- **Gin** — HTTP router
 - **Uber fx** — DI
-- **GORM** + **PostgreSQL** — source of truth
+- **GORM** + **PostgreSQL** — source of truth (+ golang-migrate SQL)
 - **go-redis** — cache + rate limit
 - **Kafka** (`segmentio/kafka-go`) — domain events + DLQ
 - **MongoDB** — immutable audit trail
 - **Typesense** — full-text search (circuit breaker)
 - **JWT** + **apikey** header — auth (pola Wisteria)
 - **Prometheus / OTel** — metrics + tracing (observability opt-in)
+- **GitLab CI** — lint/test/build/release (lihat `docs/GITLAB-SETUP.md`)
 
 ## Struktur folder
 

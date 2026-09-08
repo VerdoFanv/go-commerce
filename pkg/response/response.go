@@ -3,7 +3,7 @@ package response
 import (
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 // Envelope matches Wisteria mobile ApiResponse shape, extended with a stable
@@ -24,17 +24,16 @@ type PageMeta struct {
 	HasMore    bool `json:"hasMore"`
 }
 
-func Success(c *fiber.Ctx, status int, message string, data any) error {
-	return c.Status(status).JSON(Envelope{
+func Success(c *gin.Context, status int, message string, data any) {
+	c.JSON(status, Envelope{
 		Success: true,
 		Message: message,
 		Data:    data,
 	})
 }
 
-// SuccessWithMeta is Success plus a pagination metadata block.
-func SuccessWithMeta(c *fiber.Ctx, status int, message string, data any, meta any) error {
-	return c.Status(status).JSON(Envelope{
+func SuccessWithMeta(c *gin.Context, status int, message string, data any, meta any) {
+	c.JSON(status, Envelope{
 		Success: true,
 		Message: message,
 		Data:    data,
@@ -42,39 +41,37 @@ func SuccessWithMeta(c *fiber.Ctx, status int, message string, data any, meta an
 	})
 }
 
-// Fail keeps the original signature for simple call sites; prefer FailCode in handlers.
-func Fail(c *fiber.Ctx, status int, message string) error {
-	return c.Status(status).JSON(Envelope{
+func Fail(c *gin.Context, status int, message string) {
+	c.JSON(status, Envelope{
 		Success: false,
 		Message: message,
 	})
 }
 
-// FailCode attaches a stable machine code so clients can branch on it.
-func FailCode(c *fiber.Ctx, status int, message, code string) error {
-	return c.Status(status).JSON(Envelope{
+func FailCode(c *gin.Context, status int, message, code string) {
+	c.JSON(status, Envelope{
 		Success:   false,
 		Message:   message,
 		ErrorCode: code,
 	})
 }
 
-func FailWithErrors(c *fiber.Ctx, status int, message string, errors any) error {
-	return c.Status(status).JSON(Envelope{
+func FailWithErrors(c *gin.Context, status int, message string, errors any) {
+	c.JSON(status, Envelope{
 		Success: false,
 		Message: message,
 		Errors:  errors,
 	})
 }
 
-func OK(c *fiber.Ctx, message string, data any) error {
-	return Success(c, http.StatusOK, message, data)
+func OK(c *gin.Context, message string, data any) {
+	Success(c, http.StatusOK, message, data)
 }
 
-func OKWithMeta(c *fiber.Ctx, message string, data any, meta any) error {
-	return SuccessWithMeta(c, http.StatusOK, message, data, meta)
+func OKWithMeta(c *gin.Context, message string, data any, meta any) {
+	SuccessWithMeta(c, http.StatusOK, message, data, meta)
 }
 
-func Created(c *fiber.Ctx, message string, data any) error {
-	return Success(c, http.StatusCreated, message, data)
+func Created(c *gin.Context, message string, data any) {
+	Success(c, http.StatusCreated, message, data)
 }

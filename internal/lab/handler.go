@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/middleware"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -19,124 +19,137 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string) {
-	lab := rg.Group("/lab", middleware.Auth(jwtSecret))
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
+	lab := rg.Group("/lab")
+	lab.Use(middleware.Auth(jwtSecret))
 	{
-		lab.Get("/overview", h.overview)
+		lab.GET("/overview", h.overview)
 
-		lab.Get("/postgres/summary", h.postgresSummary)
-		lab.Get("/postgres/samples", h.postgresSamples)
+		lab.GET("/postgres/summary", h.postgresSummary)
+		lab.GET("/postgres/samples", h.postgresSamples)
 
-		lab.Get("/redis/product/:id", h.redisPeek)
-		lab.Delete("/redis/product/:id", h.redisInvalidate)
+		lab.GET("/redis/product/:id", h.redisPeek)
+		lab.DELETE("/redis/product/:id", h.redisInvalidate)
 
-		lab.Get("/mongo/events", h.mongoEvents)
+		lab.GET("/mongo/events", h.mongoEvents)
 
-		lab.Post("/kafka/ping", h.kafkaPing)
+		lab.POST("/kafka/ping", h.kafkaPing)
 
-		lab.Get("/typesense", h.typesenseExplore)
-		lab.Post("/typesense/reindex", h.typesenseReindex)
+		lab.GET("/typesense", h.typesenseExplore)
+		lab.POST("/typesense/reindex", h.typesenseReindex)
 	}
 }
 
-func (h *Handler) overview(c *fiber.Ctx) error {
-	data, err := h.svc.Overview(c.UserContext())
+func (h *Handler) overview(c *gin.Context) {
+	data, err := h.svc.Overview(c.Request.Context())
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "lab overview", data)
+	response.OK(c, "lab overview", data)
 }
 
-func (h *Handler) postgresSummary(c *fiber.Ctx) error {
-	data, err := h.svc.PostgresSummary(c.UserContext())
+func (h *Handler) postgresSummary(c *gin.Context) {
+	data, err := h.svc.PostgresSummary(c.Request.Context())
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "postgres summary", data)
+	response.OK(c, "postgres summary", data)
 }
 
-func (h *Handler) postgresSamples(c *fiber.Ctx) error {
-	limit, _ := strconv.Atoi(c.Query("limit", "10"))
-	data, err := h.svc.PostgresSamples(c.UserContext(), limit)
+func (h *Handler) postgresSamples(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	data, err := h.svc.PostgresSamples(c.Request.Context(), limit)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "postgres samples", data)
+	response.OK(c, "postgres samples", data)
 }
 
-func (h *Handler) redisPeek(c *fiber.Ctx) error {
+func (h *Handler) redisPeek(c *gin.Context) {
 	id, err := parseID(c)
 	if err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid id")
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
 	}
-	data, err := h.svc.PeekProductCache(c.UserContext(), id)
+	data, err := h.svc.PeekProductCache(c.Request.Context(), id)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "redis cache peek", data)
+	response.OK(c, "redis cache peek", data)
 }
 
-func (h *Handler) redisInvalidate(c *fiber.Ctx) error {
+func (h *Handler) redisInvalidate(c *gin.Context) {
 	id, err := parseID(c)
 	if err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid id")
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
 	}
-	data, err := h.svc.InvalidateProductCache(c.UserContext(), id)
+	data, err := h.svc.InvalidateProductCache(c.Request.Context(), id)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "redis cache invalidated", data)
+	response.OK(c, "redis cache invalidated", data)
 }
 
-func (h *Handler) mongoEvents(c *fiber.Ctx) error {
-	limit, _ := strconv.ParseInt(c.Query("limit", "20"), 10, 64)
-	data, err := h.svc.MongoEvents(c.UserContext(), limit)
+func (h *Handler) mongoEvents(c *gin.Context) {
+	limit, _ := strconv.ParseInt(c.DefaultQuery("limit", "20"), 10, 64)
+	data, err := h.svc.MongoEvents(c.Request.Context(), limit)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "mongo audit events", data)
+	response.OK(c, "mongo audit events", data)
 }
 
-func (h *Handler) kafkaPing(c *fiber.Ctx) error {
+func (h *Handler) kafkaPing(c *gin.Context) {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+		response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+		return
 	}
-	data, err := h.svc.KafkaPing(c.UserContext(), userID)
+	data, err := h.svc.KafkaPing(c.Request.Context(), userID)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.Created(c, "kafka ping published", data)
+	response.Created(c, "kafka ping published", data)
 }
 
-func (h *Handler) typesenseExplore(c *fiber.Ctx) error {
-	data, err := h.svc.TypesenseExplore(c.UserContext(), c.Query("q"))
+func (h *Handler) typesenseExplore(c *gin.Context) {
+	data, err := h.svc.TypesenseExplore(c.Request.Context(), c.Query("q"))
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "typesense explore", data)
+	response.OK(c, "typesense explore", data)
 }
 
-func (h *Handler) typesenseReindex(c *fiber.Ctx) error {
-	data, err := h.svc.TypesenseReindex(c.UserContext())
+func (h *Handler) typesenseReindex(c *gin.Context) {
+	data, err := h.svc.TypesenseReindex(c.Request.Context())
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "typesense reindex done", data)
+	response.OK(c, "typesense reindex done", data)
 }
 
-func parseID(c *fiber.Ctx) (uint, error) {
-	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+func parseID(c *gin.Context) (uint, error) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	return uint(id), err
 }
 
-func mapErr(c *fiber.Ctx, err error) error {
+func mapErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrUnavailable):
-		return response.FailCode(c, http.StatusServiceUnavailable, err.Error(), domain.ErrorCode(err))
+		response.FailCode(c, http.StatusServiceUnavailable, err.Error(), domain.ErrorCode(err))
 	case errors.Is(err, domain.ErrNotFound):
-		return response.FailCode(c, http.StatusNotFound, err.Error(), domain.ErrorCode(err))
+		response.FailCode(c, http.StatusNotFound, err.Error(), domain.ErrorCode(err))
 	default:
-		return response.Fail(c, http.StatusInternalServerError, "internal error")
+		response.Fail(c, http.StatusInternalServerError, "internal error")
 	}
 }

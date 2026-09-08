@@ -5,10 +5,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/verdofanv/golang-be/internal/audit"
 	"github.com/verdofanv/golang-be/internal/auth"
@@ -35,7 +37,6 @@ func main() {
 	fx.New(
 		fx.Provide(config.Load),
 
-		// --- Platform adapters ---
 		fx.Provide(database.Connect),
 		fx.Provide(appredis.Connect),
 		fx.Provide(mongo.Connect),
@@ -44,7 +45,6 @@ func main() {
 			return telemetry.Setup(context.Background(), cfg, "golang-be-api")
 		}),
 
-		// --- Messaging: products producer + notifier consumer group ---
 		fx.Provide(func(cfg config.Config) *kafka.Producer {
 			return kafka.NewProducer(cfg, cfg.KafkaTopicProducts)
 		}),
@@ -52,12 +52,11 @@ func main() {
 			return kafka.NewConsumer(cfg, cfg.KafkaTopicProducts, cfg.KafkaGroupNotifier)
 		}),
 
-		// --- Interface adapters (decouple services from concrete platforms) ---
 		fx.Provide(func(p *kafka.Producer) product.EventPublisher { return p }),
 		fx.Provide(func(p *kafka.Producer) lab.EventPublisher { return p }),
 		fx.Provide(func(c *typesense.Client) product.SearchEngine {
 			if c == nil {
-				return nil // typed-nil trap: return an untyped nil interface
+				return nil
 			}
 			return c
 		}),
@@ -70,7 +69,6 @@ func main() {
 		fx.Provide(func(c *mongo.Client) *audit.MongoStore { return audit.NewMongoStore(c) }),
 		fx.Provide(func(s *audit.MongoStore) lab.AuditReader { return s }),
 
-		// --- Domain ---
 		fx.Provide(auth.NewRepository),
 		fx.Provide(auth.NewService),
 		fx.Provide(auth.NewHandler),
@@ -85,7 +83,6 @@ func main() {
 		fx.Provide(lab.NewService),
 		fx.Provide(lab.NewHandler),
 
-		// --- Probes & real-time ---
 		fx.Provide(func(db *gorm.DB, rdb *appredis.Client, mdb *mongo.Client, ts *typesense.Client) *health.Handler {
 			return health.NewHandler(
 				health.PostgresCheck{DB: db},
@@ -98,19 +95,18 @@ func main() {
 		fx.Provide(notify.NewNotifier),
 		fx.Provide(notify.NewHandler),
 
-		// --- Composition root ---
-		fx.Provide(server.NewApp),
+		fx.Provide(server.NewEngine),
+		fx.Provide(server.NewHTTPServer),
 
 		fx.Invoke(registerLifecycle),
-	).Run() // blocks until SIGINT/SIGTERM, then runs OnStop hooks
+	).Run()
 }
 
-// registerLifecycle owns boot order (migrate → topics → serve) and graceful
-// shutdown (stop listeners → drain → close connections).
 func registerLifecycle(
 	lc fx.Lifecycle,
 	cfg config.Config,
-	app *fiber.App,
+	httpServer *http.Server,
+	_ *gin.Engine, // ensure engine is constructed
 	db *gorm.DB,
 	rdb *appredis.Client,
 	mdb *mongo.Client,
@@ -123,23 +119,19 @@ func registerLifecycle(
 
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
-			// 1. Schema first — never serve traffic against an unmigrated DB.
 			if err := database.Migrate(db); err != nil {
 				return fmt.Errorf("migrate: %w", err)
 			}
 
-			// 2. Topics are a dev convenience; prod topics come from IaC.
 			if err := kafka.EnsureTopics(cfg, cfg.KafkaTopicProducts, cfg.KafkaTopicDLQ); err != nil {
 				slog.Warn("ensure topics failed (broker may still be starting)", "err", err)
 			}
 
-			// 3. Real-time fan-out: Kafka → WebSocket hub.
 			go notifier.Run(notifierCtx)
 
-			// 4. HTTP server last, after everything it serves is ready.
 			go func() {
-				slog.Info("api listening", "addr", ":"+cfg.AppPort, "env", cfg.AppEnv)
-				if err := app.Listen(":" + cfg.AppPort); err != nil {
+				slog.Info("api listening", "addr", httpServer.Addr, "env", cfg.AppEnv)
+				if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 					slog.Error("server failed", "err", err)
 				}
 			}()
@@ -149,7 +141,7 @@ func registerLifecycle(
 			slog.Info("shutting down api")
 			stopNotifier()
 
-			if err := app.ShutdownWithContext(ctx); err != nil {
+			if err := httpServer.Shutdown(ctx); err != nil {
 				slog.Warn("http shutdown", "err", err)
 			}
 			if err := consumer.Close(); err != nil {

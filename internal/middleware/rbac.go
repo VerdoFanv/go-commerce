@@ -3,27 +3,30 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/pkg/response"
 )
 
-// RequireRole enforces RBAC after Auth has populated the role local.
-// Usage: adminOnly := middleware.RequireRole(domain.RoleAdmin)
-func RequireRole(roles ...string) fiber.Handler {
+// RequireRole enforces RBAC after Auth has populated the role in context.
+func RequireRole(roles ...string) gin.HandlerFunc {
 	allowed := make(map[string]struct{}, len(roles))
 	for _, r := range roles {
 		allowed[r] = struct{}{}
 	}
 
-	return func(c *fiber.Ctx) error {
+	return func(c *gin.Context) {
 		role, ok := UserRole(c)
 		if !ok {
-			return response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+			response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
+			c.Abort()
+			return
 		}
 		if _, ok := allowed[role]; !ok {
-			return response.FailCode(c, http.StatusForbidden, domain.ErrForbidden.Error(), domain.ErrorCode(domain.ErrForbidden))
+			response.FailCode(c, http.StatusForbidden, domain.ErrForbidden.Error(), domain.ErrorCode(domain.ErrForbidden))
+			c.Abort()
+			return
 		}
-		return c.Next()
+		c.Next()
 	}
 }

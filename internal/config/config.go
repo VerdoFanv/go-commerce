@@ -123,6 +123,14 @@ func Load() Config {
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
+	if cfg.IsProduction() {
+		if cfg.APIKey == "" || cfg.APIKey == "dev-api-key" || cfg.APIKey == "change-me" {
+			panic("invalid configuration: production requires a real API_KEY from env/secret")
+		}
+		if len(cfg.JWTSecret) < 16 || cfg.JWTSecret == "dev-secret-change-me" {
+			panic("invalid configuration: production requires a real JWT_SECRET (min 16) from env/secret")
+		}
+	}
 	return cfg
 }
 

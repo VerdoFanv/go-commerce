@@ -3,7 +3,7 @@ package integration_test
 import (
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/verdofanv/golang-be/internal/auth"
 	"github.com/verdofanv/golang-be/internal/domain"
@@ -12,7 +12,7 @@ import (
 	"github.com/verdofanv/golang-be/test/testutil"
 )
 
-func setupAuthAPI() (*fiber.App, *mocks.AuthRepository) {
+func setupAuthAPI() (*gin.Engine, *mocks.AuthRepository) {
 	cfg := testutil.Config()
 	repo := mocks.NewAuthRepository()
 	svc := auth.NewService(repo, cfg)

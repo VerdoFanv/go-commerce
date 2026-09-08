@@ -1,0 +1,132 @@
+# GitLab CI/CD — replaces GitHub Actions for this portfolio repo.
+# Docs: docs/GITLAB-SETUP.md
+
+stages:
+  - lint
+  - test
+  - build
+  - release
+
+variables:
+  GO_VERSION: "1.25"
+  GOPATH: $CI_PROJECT_DIR/.go
+  GONOSUMDB: "*"
+  DOCKER_TLS_CERTDIR: "/certs"
+  # Override in GitLab CI/CD Variables if using a private registry:
+  # CI_REGISTRY_IMAGE is provided by GitLab when Container Registry is enabled.
+
+default:
+  image: golang:${GO_VERSION}-bookworm
+  interruptible: true
+  cache:
+    key:
+      files:
+        - go.sum
+    paths:
+      - .go/pkg/mod/
+
+.golang_before: &golang_before
+  before_script:
+    - go version
+    - go env -w GOPATH="$GOPATH"
+    - go mod download
+
+lint:
+  stage: lint
+  <<: *golang_before
+  script:
+    - go vet ./...
+    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.1.6
+    - $(go env GOPATH)/bin/golangci-lint run --timeout=5m
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+test:
+  stage: test
+  <<: *golang_before
+  script:
+    - go test ./test/unit/... ./test/integration/...
+    - go test -race ./test/unit/... ./test/integration/...
+    - go test -coverprofile=coverage.out -covermode=atomic ./test/unit/... ./test/integration/...
+    - go tool cover -func=coverage.out
+  artifacts:
+    when: always
+    paths:
+      - coverage.out
+    expire_in: 1 week
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+build:
+  stage: build
+  <<: *golang_before
+  script:
+    - go mod verify
+    - mkdir -p bin
+    - CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/api ./cmd/api
+    - CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/worker ./cmd/worker
+  artifacts:
+    paths:
+      - bin/
+    expire_in: 1 week
+  needs: ["lint", "test"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+# Build images + Trivy on default branch / tags. Push only when registry is configured.
+docker:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  needs: ["lint", "test"]
+  before_script:
+    - docker info
+  script:
+    - docker build --target api -t golang-be-api:ci .
+    - docker build --target worker -t golang-be-worker:ci .
+    - |
+      if command -v trivy >/dev/null 2>&1; then
+        trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed golang-be-api:ci
+        trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed golang-be-worker:ci
+      else
+        echo "Installing trivy..."
+        apk add --no-cache curl
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed golang-be-api:ci
+        trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed golang-be-worker:ci
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+release:
+  stage: release
+  image: docker:27
+  services:
+    - docker:27-dind
+  needs: ["docker"]
+  before_script:
+    - docker info
+    # Login to GitLab Container Registry (CI_JOB_TOKEN works when registry enabled).
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - |
+      API_IMAGE="${CI_REGISTRY_IMAGE}/api"
+      WORKER_IMAGE="${CI_REGISTRY_IMAGE}/worker"
+      TAG="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"
+      docker build --target api -t "${API_IMAGE}:${TAG}" -t "${API_IMAGE}:latest" .
+      docker build --target worker -t "${WORKER_IMAGE}:${TAG}" -t "${WORKER_IMAGE}:latest" .
+      docker push "${API_IMAGE}:${TAG}"
+      docker push "${WORKER_IMAGE}:${TAG}"
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] || [ -n "$CI_COMMIT_TAG" ]; then
+        docker push "${API_IMAGE}:latest"
+        docker push "${WORKER_IMAGE}:latest"
+      fi
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

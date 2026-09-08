@@ -1,16 +1,13 @@
 // Package server is the composition root for the HTTP API: it wires middleware
-// order, routes, probes, and the metrics/pprof surface. Keeping this separate
-// from main means tests can build the exact same app as production.
+// order, routes, probes, and the metrics/pprof surface.
 package server
 
 import (
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/adaptor"
-	"github.com/gofiber/fiber/v2/middleware/compress"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/pprof"
-	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/gofiber/fiber/v2/middleware/requestid"
+	"net/http"
+	"net/http/pprof"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/verdofanv/golang-be/internal/auth"
 	"github.com/verdofanv/golang-be/internal/config"
@@ -24,10 +21,8 @@ import (
 	"github.com/verdofanv/golang-be/internal/wishlist"
 )
 
-// NewApp builds the fully-middlewared Fiber application.
-// Middleware order matters: recover → requestid → tracing → metrics → security
-// → CORS → compress → timeout → logger → routes.
-func NewApp(
+// NewEngine builds the fully-middlewared Gin engine.
+func NewEngine(
 	cfg config.Config,
 	redisClient *appredis.Client,
 	authH *auth.Handler,
@@ -36,41 +31,49 @@ func NewApp(
 	labH *lab.Handler,
 	healthH *health.Handler,
 	notifyH *notify.Handler,
-) *fiber.App {
-	app := fiber.New(fiber.Config{
-		DisableStartupMessage: cfg.IsProduction(),
-		ReadBufferSize:        4096,
-		// Trust the platform (LB/Ingress) to terminate; app speaks plain HTTP.
-		ProxyHeader: fiber.HeaderXForwardedFor,
-	})
-
-	app.Use(recover.New())
-	app.Use(requestid.New())
-	app.Use(middleware.Tracing("golang-be-api"))
-	app.Use(metrics.Middleware())
-	app.Use(middleware.SecurityHeaders())
-	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*", // public API; tighten per-environment in real deployments
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization, apikey, X-API-Key",
-		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
-	}))
-	app.Use(compress.New())
-	app.Use(middleware.Timeout(cfg.RequestTimeout))
-	app.Use(middleware.RequestLogger())
-
-	// --- Ops surface (no API key: load balancers and scrapers must reach it) ---
-	healthH.RegisterRoutes(app)
-	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
-	if !cfg.IsProduction() {
-		app.Use(pprof.New()) // /debug/pprof — dev only
+) *gin.Engine {
+	if cfg.IsProduction() {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// --- Business API ---
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	engine.Use(middleware.RequestID())
+	engine.Use(middleware.Tracing("golang-be-api"))
+	engine.Use(metrics.Middleware())
+	engine.Use(middleware.SecurityHeaders())
+	engine.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"*"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization", "apikey", "X-API-Key"},
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+	}))
+	engine.Use(middleware.Timeout(cfg.RequestTimeout))
+	engine.Use(middleware.RequestLogger())
+
+	// Trust proxy headers when behind Traefik / k3s ingress.
+	_ = engine.SetTrustedProxies(nil)
+
+	healthH.RegisterRoutes(engine)
+	engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	if !cfg.IsProduction() {
+		dbg := engine.Group("/debug/pprof")
+		{
+			dbg.GET("/", gin.WrapF(pprof.Index))
+			dbg.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+			dbg.GET("/profile", gin.WrapF(pprof.Profile))
+			dbg.GET("/symbol", gin.WrapF(pprof.Symbol))
+			dbg.GET("/trace", gin.WrapF(pprof.Trace))
+			dbg.GET("/heap", gin.WrapH(pprof.Handler("heap")))
+			dbg.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		}
+	}
+
 	var limiter middleware.RateLimiter
 	if redisClient != nil {
 		limiter = middleware.NewRedisLimiter(redisClient.Raw())
 	}
-	api := app.Group("/api/v1",
+	api := engine.Group("/api/v1",
 		middleware.APIKey(cfg.APIKey),
 		middleware.RateLimit(limiter, cfg.RateLimitMax, cfg.RateLimitWindow),
 	)
@@ -79,14 +82,19 @@ func NewApp(
 	wishlistH.RegisterRoutes(api, cfg.JWTSecret)
 	labH.RegisterRoutes(api, cfg.JWTSecret)
 
-	// --- Real-time ---
-	notifyH.RegisterRoutes(app)
+	notifyH.RegisterRoutes(engine)
 
-	// --- Docs ---
-	app.Static("/docs", "./docs")
-	app.Get("/docs", func(c *fiber.Ctx) error {
-		return c.SendFile("./docs/index.html")
-	})
+	// Static docs (Swagger UI). Avoid registering GET /docs/ — conflicts with Static wildcard.
+	engine.Static("/docs", "./docs")
 
-	return app
+	return engine
+}
+
+// NewHTTPServer wraps the Gin engine in a stdlib server for graceful shutdown.
+func NewHTTPServer(cfg config.Config, engine *gin.Engine) *http.Server {
+	return &http.Server{
+		Addr:              ":" + cfg.AppPort,
+		Handler:           engine,
+		ReadHeaderTimeout: cfg.RequestTimeout,
+	}
 }

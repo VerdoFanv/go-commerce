@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/middleware"
 	"github.com/verdofanv/golang-be/pkg/response"
@@ -18,13 +18,13 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg fiber.Router, jwtSecret string) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
 	authGroup := rg.Group("/authentication")
 	{
-		authGroup.Post("/register", h.register)
-		authGroup.Post("/login", h.login)
-		authGroup.Post("/refresh-token", h.refresh)
-		authGroup.Get("/me", middleware.Auth(jwtSecret), h.me)
+		authGroup.POST("/register", h.register)
+		authGroup.POST("/login", h.login)
+		authGroup.POST("/refresh-token", h.refresh)
+		authGroup.GET("/me", middleware.Auth(jwtSecret), h.me)
 	}
 }
 
@@ -43,72 +43,80 @@ type refreshRequest struct {
 	RefreshToken string `json:"refreshToken" validate:"required"`
 }
 
-func (h *Handler) register(c *fiber.Ctx) error {
+func (h *Handler) register(c *gin.Context) {
 	var req registerRequest
 	if err := response.BindJSON(c, &req); err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid request body")
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
-	result, err := h.svc.Register(c.UserContext(), RegisterInput(req))
+	result, err := h.svc.Register(c.Request.Context(), RegisterInput(req))
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.Created(c, "registered", result)
+	response.Created(c, "registered", result)
 }
 
-func (h *Handler) login(c *fiber.Ctx) error {
+func (h *Handler) login(c *gin.Context) {
 	var req loginRequest
 	if err := response.BindJSON(c, &req); err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid request body")
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
-	result, err := h.svc.Login(c.UserContext(), LoginInput(req))
+	result, err := h.svc.Login(c.Request.Context(), LoginInput(req))
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "login success", result)
+	response.OK(c, "login success", result)
 }
 
-func (h *Handler) refresh(c *fiber.Ctx) error {
+func (h *Handler) refresh(c *gin.Context) {
 	var req refreshRequest
 	if err := response.BindJSON(c, &req); err != nil {
-		return response.Fail(c, http.StatusBadRequest, "invalid request body")
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
-	tokens, err := h.svc.Refresh(c.UserContext(), req.RefreshToken)
+	tokens, err := h.svc.Refresh(c.Request.Context(), req.RefreshToken)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "token refreshed", tokens)
+	response.OK(c, "token refreshed", tokens)
 }
 
-func (h *Handler) me(c *fiber.Ctx) error {
+func (h *Handler) me(c *gin.Context) {
 	userID, ok := middleware.UserID(c)
 	if !ok {
-		return response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		response.Fail(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error())
+		return
 	}
 
-	user, err := h.svc.Me(c.UserContext(), userID)
+	user, err := h.svc.Me(c.Request.Context(), userID)
 	if err != nil {
-		return mapErr(c, err)
+		mapErr(c, err)
+		return
 	}
-	return response.OK(c, "success", user)
+	response.OK(c, "success", user)
 }
 
-func mapErr(c *fiber.Ctx, err error) error {
+func mapErr(c *gin.Context, err error) {
 	code := domain.ErrorCode(err)
 	switch {
 	case errors.Is(err, domain.ErrInvalid):
-		return response.FailCode(c, http.StatusBadRequest, err.Error(), code)
+		response.FailCode(c, http.StatusBadRequest, err.Error(), code)
 	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrTokenExpired):
-		return response.FailCode(c, http.StatusUnauthorized, err.Error(), code)
+		response.FailCode(c, http.StatusUnauthorized, err.Error(), code)
 	case errors.Is(err, domain.ErrEmailTaken):
-		return response.FailCode(c, http.StatusConflict, err.Error(), code)
+		response.FailCode(c, http.StatusConflict, err.Error(), code)
 	case errors.Is(err, domain.ErrNotFound):
-		return response.FailCode(c, http.StatusNotFound, err.Error(), code)
+		response.FailCode(c, http.StatusNotFound, err.Error(), code)
 	case errors.Is(err, domain.ErrForbidden):
-		return response.FailCode(c, http.StatusForbidden, err.Error(), code)
+		response.FailCode(c, http.StatusForbidden, err.Error(), code)
 	default:
-		return response.FailCode(c, http.StatusInternalServerError, "internal error", code)
+		response.FailCode(c, http.StatusInternalServerError, "internal error", code)
 	}
 }
