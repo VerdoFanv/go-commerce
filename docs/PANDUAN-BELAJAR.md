@@ -124,6 +124,7 @@ Detail kode: [`docs/belajar/09-commerce-reliability.md`](belajar/09-commerce-rel
 | `GET` | `/api/v1/orders` / `/:id` | List / detail |
 | `POST` | `/api/v1/orders/:id/cancel` | State machine + release stock |
 | `POST` | `/api/v1/orders/:id/pay` | Simulator `outcome=success\|fail\|timeout` |
+| `POST` | `/api/v1/orders/:id/fulfill` | `paid` → `fulfilled` |
 | `GET` | `/api/v1/lab/commerce/failure-matrix` | Failure matrix hidup |
 | `GET/POST` | `/api/v1/lab/outbox/*` | Pending / pause / resume / relay-once |
 
@@ -217,7 +218,9 @@ Client
                       └─ notifier (di API) → WebSocket
 ```
 
-Walkthrough kode (folder, fx, middleware, tiap fitur): **[belajar/](belajar/README.md)**.
+Walkthrough kode (folder, fx, middleware, order/outbox): **[belajar/](belajar/README.md)** — mulai index, fokus bisnis di [09-commerce-reliability](belajar/09-commerce-reliability.md).
+
+Ringkasan portfolio (EN, termasuk commerce): **[README.md](../README.md)**.
 
 ---
 

@@ -64,8 +64,9 @@ Hampir semua fitur API punya 4 file:
 
 ## Apa yang TIDAK ada di `internal/http`
 
-- Loop Kafka worker → itu `internal/worker/audit`
+- Loop Kafka worker → `internal/worker/dispatch` (+ payment/inventory/audit)
 - Koneksi Postgres/Redis mentah → `internal/platform/*`
+- Outbox/inbox/ledger helpers → `internal/platform/outbox|inbox|ledger`
 - Bentuk error/entity publik → `internal/domain`
 
 ---
@@ -74,13 +75,17 @@ Hampir semua fitur API punya 4 file:
 
 | Kamu mau… | Buka… |
 |-----------|--------|
-| Tambah route baru | `internal/http/<feature>/handler.go` + `server/server.go` (kalau belum di-wire) |
+| Tambah route baru | `internal/http/<feature>/handler.go` + `server/server.go` |
 | Ubah JWT / apikey | `internal/http/middleware/` |
-| Ubah aturan “siapa boleh delete product” | `internal/http/product/service.go` |
-| Ubah cara event di-audit | `internal/worker/audit/` |
+| Ubah aturan delete product | `internal/http/product/service.go` |
+| Ubah create order / stock hold | `internal/http/order/repository.go` |
+| Ubah cara event keluar ke Kafka (order) | `internal/platform/outbox/` + relay di `cmd/api` |
+| Ubah payment simulator | `internal/worker/payment/` |
+| Ubah commit/release stock | `internal/worker/inventory/` + `platform/ledger` |
+| Ubah dedupe consumer | `internal/platform/inbox/` |
+| Ubah audit Mongo / DLQ | `internal/worker/audit/` |
 | Ubah env / validasi boot | `internal/config/config.go` |
-| Ubah koneksi Kafka | `internal/platform/kafka/kafka.go` |
 | Ubah format JSON response | `pkg/response/` |
-| Baca test sebagai contoh pemakaian | `test/unit/<feature>/`, `test/integration/` |
+| Baca test contoh | `test/unit/<feature>/`, `test/integration/` |
 
 Lanjut → [02-entrypoints.md](02-entrypoints.md)

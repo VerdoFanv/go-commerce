@@ -64,6 +64,7 @@ Produksi: `Load` menolak `API_KEY` / `JWT_SECRET` default.
 | `golangbe_events_published_total` | Event ke Kafka (by type) |
 | `golangbe_events_consumed_total` | Event dikonsumsi (by type + consumer) |
 | `golangbe_events_dead_lettered_total` | Ke DLQ |
+| `golangbe_outbox_pending` | Gauge: baris outbox belum publish (lag relay) |
 | `golangbe_websocket_active_connections` | Gauge koneksi WS |
 
 `Middleware()` — dipasang di Gin engine; catat setelah `c.Next()`.
@@ -100,9 +101,13 @@ Semua handler HTTP harus lewat package ini — jangan tulis JSON ad-hoc.
 | `000002_seed_admin` | Admin awal |
 | `000003_seed_demo_data` | Seller/buyer + produk demo |
 | `000004_wishlists` | Tabel wishlist + seed |
-| `migrations.go` | Embed SQL + runner yang dipanggil `database.Migrate` |
+| `000005_commerce` | orders, items, reservations, payments, idempotency_keys, outbox_events |
+| `000006_inbox_ledger` | `processed_events` (inbox) + `stock_ledger` |
+| `migrations.go` | Embed SQL + runner (`database.Migrate`) |
 
-Hanya **API** yang menjalankan migrate saat OnStart. Worker tidak ubah schema.
+Hanya **API** yang migrate saat OnStart. Worker memakai schema yang sama, tidak mengubahnya.
+
+Domain order: lihat `internal/domain/order.go` (status, event types, `CanTransition`).
 
 ---
 

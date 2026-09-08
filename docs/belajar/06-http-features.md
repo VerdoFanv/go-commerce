@@ -1,8 +1,8 @@
-# 06 — HTTP features (auth, product, wishlist, lab, notify)
+# 06 — HTTP features (auth, product, wishlist, order, lab, notify)
 
 Tujuan: tiap package fitur — **route, fungsi service, side effect infra**.
 
-Prefix semua REST di bawah: `/api/v1` (+ header `apikey`).
+Prefix REST: `/api/v1` (+ header `apikey`).
 
 ---
 
@@ -99,14 +99,51 @@ Belajar pola: **counter hot path di Redis**, source of truth tetap Postgres.
 
 ---
 
+## Order — `internal/http/order/` (commerce)
+
+Ini jalur **reliability**: transactional outbox + stock hold + idempotency. Detail mendalam → [09-commerce-reliability.md](09-commerce-reliability.md).
+
+### Routes (JWT)
+
+| Method | Path | Catatan |
+|--------|------|---------|
+| POST | `/orders` | **Wajib** header `Idempotency-Key` |
+| GET | `/orders` | List milik user |
+| GET | `/orders/:id` | Detail + items |
+| POST | `/orders/:id/cancel` | State machine + release stock + outbox |
+| POST | `/orders/:id/pay` | Simulator `outcome=success\|fail\|timeout` |
+| POST | `/orders/:id/fulfill` | `paid` → `fulfilled` + outbox |
+
+### Create (inti)
+
+Satu TX Postgres:
+
+1. `UPDATE products SET stock = stock - qty WHERE stock >= qty` (anti oversell)
+2. Insert `orders` + `order_items` + `inventory_reservations` (`held`)
+3. `stock_ledger` reason `hold`
+4. `outbox_events` type `order.created`
+5. Setelah sukses: simpan response di `idempotency_keys` untuk replay
+
+**Bukan** `go kafka.Publish` di request path.
+
+### Bandingkan dengan product
+
+| | Product | Order |
+|-|---------|-------|
+| Publish | `publishAsync` setelah commit | Outbox dalam TX yang sama |
+| Kafka down | Event bisa hilang | Order tetap 201; pending di outbox |
+| Idempotency HTTP | tidak | `Idempotency-Key` |
+
+---
+
 ## Lab — `internal/http/lab/`
 
-Endpoint **belajar infra**, bukan domain bisnis production. Tetap butuh JWT + apikey.
+Endpoint **belajar infra + reliability**, tetap butuh JWT + apikey.
 
 | Method | Path | Fungsi service |
 |--------|------|----------------|
 | GET | `/lab/overview` | Status ringkas semua dependency |
-| GET | `/lab/postgres/summary` | Count tabel |
+| GET | `/lab/postgres/summary` | Count tabel (+ orders) |
 | GET | `/lab/postgres/samples` | Sample products |
 | GET | `/lab/redis/product/:id` | Peek cache product |
 | DELETE | `/lab/redis/product/:id` | Invalidate cache |
@@ -114,8 +151,10 @@ Endpoint **belajar infra**, bukan domain bisnis production. Tetap butuh JWT + ap
 | POST | `/lab/kafka/ping` | Publish `lab.ping` |
 | GET | `/lab/typesense` | Explore/search + stats |
 | POST | `/lab/typesense/reindex` | Rebuild index dari Postgres |
-
-Pakai ini untuk verifikasi end-to-end tanpa harus “nebak” dari log saja.
+| GET | `/lab/commerce/failure-matrix` | Matriks failure hidup |
+| GET | `/lab/outbox/pending` | Unpublished outbox rows |
+| POST | `/lab/outbox/pause` / `resume` | Chaos: hentikan / hidupkan relay loop |
+| POST | `/lab/outbox/relay-once` | Paksa satu siklus publish |
 
 ---
 

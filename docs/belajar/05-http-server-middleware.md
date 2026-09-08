@@ -17,7 +17,7 @@ Urutan `Use` (atas → bawah = luar → dalam):
 | 3 | `Tracing` | Span OTel per request |
 | 4 | `metrics.Middleware` | RED Prometheus |
 | 5 | `SecurityHeaders` | Header keamanan dasar |
-| 6 | CORS | Origin `*`, header `apikey` / `Authorization` |
+| 6 | CORS | Origin `*`, header `apikey` / `Authorization` / **`Idempotency-Key`** |
 | 7 | `Timeout` | Batas waktu request (`REQUEST_TIMEOUT`) |
 | 8 | `RequestLogger` | Log method/path/status/latency |
 

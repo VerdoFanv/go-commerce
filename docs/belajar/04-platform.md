@@ -11,11 +11,12 @@ Tujuan: paham **cara app bicara ke infra**. Feature service tidak import driver 
 | `Connect(cfg)` | Buka `*gorm.DB` dari DSN config |
 | `Migrate(db)` | Jalankan SQL migrations embed |
 
-Source of truth relasional: users, products, wishlists.
+Source of truth relasional: users, products, wishlists, **orders / reservations / payments / outbox / inbox / ledger**.
 
 ---
 
 ## `platform/redis`
+
 
 | Symbol | Fungsi |
 |--------|--------|
@@ -58,10 +59,44 @@ Worker + lab baca/tulis audit lewat `worker/audit` store, bukan langsung dari ba
 
 | Group (config) | Proses | Tujuan |
 |----------------|--------|--------|
-| `KafkaGroupWorker` | `cmd/worker` | Persist audit Mongo + DLQ |
+| `KafkaGroupWorker` | `cmd/worker` | payment + inventory + audit + DLQ |
 | `KafkaGroupNotifier` | `cmd/api` (notify) | Broadcast WebSocket |
 
 Commit offset hanya setelah side effect sukses (at-least-once).
+
+---
+
+## `platform/outbox` — transactional outbox
+
+| Symbol | Fungsi |
+|--------|--------|
+| `Writer.Enqueue(tx, …)` | Insert `outbox_events` **di dalam TX bisnis** |
+| `Relay.Run` / `RelayOnce` | Poll unpublished → Kafka publish → set `published_at` |
+| `SetPaused` / `ListPending` | Chaos lab + observability |
+
+Ini jawaban untuk **dual-write problem**: jangan `INSERT order` lalu `Publish` terpisah tanpa jaminan.
+
+---
+
+## `platform/inbox` — consumer dedupe
+
+| Symbol | Fungsi |
+|--------|--------|
+| `Claim(tx, consumer, eventID, type)` | Insert `processed_events`; `false` = sudah pernah |
+| Dipakai | `worker/payment`, `worker/inventory` |
+
+Pasangan natural outbox: broker at-least-once → side effect sekali per consumer.
+
+---
+
+## `platform/ledger` — stock movements
+
+| Symbol | Fungsi |
+|--------|--------|
+| `Append(tx, productID, orderID, delta, reason, balance)` | Baris immutable di `stock_ledger` |
+| Reasons | `hold` / `release` / `commit` |
+
+Sistem besar jarang cuma `UPDATE stock` tanpa jejak — ledger membuat inventori bisa diaudit.
 
 ---
 
@@ -95,11 +130,13 @@ Dipasang di boot API/worker; middleware `Tracing` inject span per request.
 ## Aturan arsitektur
 
 ```text
-handler → service → (repository | platform client | interface)
+handler → service → (repository | outbox.Writer | platform client)
                          ↓
-                   GORM / Redis / Kafka / Typesense / Mongo
+              GORM TX (+ outbox_events / ledger / inbox di worker)
+                         ↓
+              Relay → Kafka → worker dispatch → side effects
 ```
 
-Service **boleh** depend ke interface lokal (`EventPublisher`, `SearchEngine`) yang di-wire di `cmd/api` ke implementasi platform — supaya test bisa fake.
+Service **boleh** depend ke interface lokal (`EventPublisher`, `SearchEngine`) yang di-wire di `cmd/api` — supaya test bisa fake.
 
 Lanjut → [05-http-server-middleware.md](05-http-server-middleware.md)

@@ -425,6 +425,24 @@ paths:
         "503":
           description: Simulated timeout
 
+  /api/v1/orders/{id}/fulfill:
+    post:
+      tags: [Orders]
+      summary: Mark paid order as fulfilled
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Fulfilled
+        "409":
+          description: Illegal state transition
+
   /ws/products:
     get:
       tags: [Realtime]

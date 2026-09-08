@@ -1,46 +1,60 @@
 # Belajar kode Golang BE
 
-Mulai dari sini. Panduan dipecah biar tidak numpuk — baca berurutan, buka file kode di editor sambil baca.
+Mulai dari sini. Panduan **dipisah per topik** biar enak dibaca — buka file Go di editor sambil ikut urutan.
 
-## Urutan baca (disarankan)
+Ada **dua jalur** (boleh campur):
 
-| # | File | Isi |
-|---|------|-----|
-| 1 | [01-peta-folder.md](01-peta-folder.md) | Peta `internal/` — mana API, mana worker, mana shared |
-| 2 | [02-entrypoints.md](02-entrypoints.md) | `cmd/api` & `cmd/worker` — proses start, fx wiring, lifecycle |
-| 3 | [03-shared-core.md](03-shared-core.md) | `domain`, `config`, `metrics`, `pkg/response`, migrations |
-| 4 | [04-platform.md](04-platform.md) | Adapter infra: Postgres, Redis, Mongo, Kafka, Typesense, OTel |
-| 5 | [05-http-server-middleware.md](05-http-server-middleware.md) | Gin server + rantai middleware |
-| 6 | [06-http-features.md](06-http-features.md) | Auth, product, wishlist, lab, health, notify |
-| 7 | [07-worker.md](07-worker.md) | Audit consumer, retry, DLQ, Mongo store |
-| 8 | [08-alur-end-to-end.md](08-alur-end-to-end.md) | Satu request create product → Kafka → worker + WebSocket |
-| 9 | [09-commerce-reliability.md](09-commerce-reliability.md) | Order/inventory/payment, outbox, idempotency, failure matrix |
+| Jalur | Fokus | Modul |
+|-------|--------|--------|
+| **A — Fondasi** | Struktur, HTTP, product CRUD, infra adapters | 01 → 08 |
+| **B — Sistem besar** | Order, outbox, inbox, payment, inventory, failure matrix | **09** (+ update di 02/04/06/07/08) |
 
-## Ops / lab (terpisah)
+Kalau goal-mu mereplikasi problem bisnis produksi: **baca 01–04 singkat, lalu loncat ke 09**, setelah itu balik ke 07–08 untuk E2E.
 
-- Setup, deploy, infra, backup → [`../PANDUAN-BELAJAR.md`](../PANDUAN-BELAJAR.md)
-- GitLab dual mode → [`../GITLAB-SETUP.md`](../GITLAB-SETUP.md)
-- Public IP / domain → [`../PUBLIC-ACCESS.md`](../PUBLIC-ACCESS.md)
+---
+
+## Urutan baca
+
+| # | File | Isi | Update terbaru |
+|---|------|-----|----------------|
+| 1 | [01-peta-folder.md](01-peta-folder.md) | Peta `internal/` API vs worker vs shared | + `order`, `dispatch`, outbox/inbox/ledger |
+| 2 | [02-entrypoints.md](02-entrypoints.md) | `cmd/api` & `cmd/worker` + fx lifecycle | + outbox relay, worker Postgres + dispatch |
+| 3 | [03-shared-core.md](03-shared-core.md) | domain, config, metrics, response, migrations | + `000005`/`000006`, outbox lag metric |
+| 4 | [04-platform.md](04-platform.md) | Adapter infra | + **outbox**, **inbox**, **ledger** |
+| 5 | [05-http-server-middleware.md](05-http-server-middleware.md) | Gin + middleware | Idempotency-Key di CORS |
+| 6 | [06-http-features.md](06-http-features.md) | Auth, product, wishlist, **order**, lab, notify | routes commerce + lab outbox |
+| 7 | [07-worker.md](07-worker.md) | Worker penuh | dispatch → payment / inventory / audit |
+| 8 | [08-alur-end-to-end.md](08-alur-end-to-end.md) | Cerita request | product **dan** order E2E |
+| 9 | [09-commerce-reliability.md](09-commerce-reliability.md) | Lab problem sistem besar | outbox, inbox, ledger, fulfill, chaos |
+
+Ops / deploy (bukan walkthrough kode):
+
+- [`../PANDUAN-BELAJAR.md`](../PANDUAN-BELAJAR.md)
+- [`../GITLAB-SETUP.md`](../GITLAB-SETUP.md)
+- [`../PUBLIC-ACCESS.md`](../PUBLIC-ACCESS.md)
+- Ringkasan portfolio (EN): [`../../README.md`](../../README.md)
+
+---
 
 ## Cara belajar yang efektif
 
-1. Buka file Go yang disebut di panduan.
-2. Cari symbol (fungsi/tipe) yang dijelaskan — jangan hanya baca markdown.
-3. Ikuti **siapa memanggil siapa** (handler → service → repo / platform).
-4. Setelah satu modul, coba ubah log / breakpoint kecil, jalankan test terkait.
+1. Buka file Go yang disebut — jangan cuma scroll markdown.
+2. Trace **siapa memanggil siapa** (handler → service → repo / platform).
+3. Bandingkan dua jalur publish: `product.publishAsync` vs `outbox.Relay`.
+4. Praktek lab: `POST /orders` → pause outbox → pending → resume → worker `paid`.
 
 ```bash
-# contoh: test auth saja
-go test ./test/unit/auth/ ./test/integration/ -run Auth -count=1
+go test ./test/unit/order/ ./test/unit/domain/ ./test/integration/ -run Order -count=1
+go test ./test/unit/audit/ ./test/unit/payment/ ./test/unit/inventory/ -count=1
 ```
 
-## Cheat sheet 10 detik
+## Cheat sheet
 
 ```text
-cmd/api          → proses HTTP (Gin)
-cmd/worker       → proses Kafka consumer
+cmd/api      → HTTP + migrate + outbox relay + WS notifier
+cmd/worker   → dispatch(payment|inventory) + audit + DLQ
 
-internal/http/   → SEMUA kode API
-internal/worker/ → SEMUA kode worker
-internal/domain|config|platform|metrics → dipakai keduanya
+internal/http/order     → commerce API
+internal/platform/outbox|inbox|ledger → reliability patterns
+internal/worker/dispatch|payment|inventory|audit
 ```

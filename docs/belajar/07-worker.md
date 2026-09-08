@@ -1,91 +1,93 @@
-# 07 — Worker audit (`internal/worker/audit/`)
+# 07 — Worker (dispatch, payment, inventory, audit)
 
-Tujuan: paham proses kedua — **consume Kafka → tulis Mongo → commit / DLQ**.
+Tujuan: paham proses kedua — **consume Kafka → side effect bisnis → audit → commit / DLQ**.
 
-Buka: `cmd/worker/main.go`, `internal/worker/audit/audit.go`, `store.go`.
+Buka: `cmd/worker/main.go`, `internal/worker/dispatch/`, `payment/`, `inventory/`, `audit/`.
 
 ---
 
-## Kenapa worker terpisah dari API?
+## Kenapa worker terpisah?
 
 | | API | Worker |
 |-|-----|--------|
 | Scaling | HTTP RPS | Lag Kafka / throughput write |
-| Failure | User langsung lihat error | Retry + DLQ tanpa blokir request |
-| Deploy | Rolling + readiness | Bisa restart tanpa drop traffic HTTP |
+| Failure | User lihat error | Retry + DLQ tanpa blokir request |
+| Deploy | Rolling + readiness | Restart tanpa drop traffic HTTP |
 
-Satu topic, consumer group **beda** dari notifier di API.
-
----
-
-## Tipe inti
-
-### `Record` (dokumen Mongo)
-
-| Field | Arti |
-|-------|------|
-| `eventId` | ID event Kafka (unique index → idempotent) |
-| `type` | mis. `product.created`, `lab.ping` |
-| `payload` | isi event |
-| `occurredAt` / `processedAt` | waktu event vs waktu audit |
-| `consumer` | `"worker"` |
-
-### `Store` interface
-
-`Insert` saja di interface processor — mudah di-fake di unit test.  
-`MongoStore` menambah `ListRecent`, `Count`, `EnsureIndexes` untuk lab + boot.
+Satu topic `products.events`, consumer group **beda** dari notifier di API.
 
 ---
 
-## `Processor.Handle` — alur satu message
+## `dispatch.Processor`
 
 ```text
 Fetch message
     │
-    ├─ event.ID kosong? → deadLetter (poison) → return nil (caller commit)
+    ├─ routeCommerce (jika event.ID ada)
+    │     order.created              → payment.HandleOrderCreated
+    │     order.paid|cancelled|…     → inventory.Handle
     │
-    └─ bangun Record
+    └─ audit.Handle  (selalu; poison → DLQ)
            │
-           ├─ Insert Mongo (max 3x, backoff exponential)
-           │     sukses → return nil → caller Commit offset
-           │
-           └─ gagal semua → deadLetter → return nil → commit
-                (pesan “selesai” dari sudut consumer; salinan di DLQ)
+           sukses → caller Commit offset
 ```
 
-| Fungsi | Fungsi bisnis |
-|--------|----------------|
-| `Handle` | Persist + retry + DLQ decision |
-| `deadLetter` | Publish ke topic DLQ dengan `reason` + `rawMessage` |
-
-**Penting:** loop di `cmd/worker` hanya `Commit` kalau `Handle` return `nil`. Kalau `Handle` return error (mis. DLQ publish gagal), offset tidak maju → message di-retry.
+File: `internal/worker/dispatch/dispatch.go`.
 
 ---
 
-## `MongoStore`
+## Payment — `internal/worker/payment/`
 
-| Fungsi | Fungsi |
+Pada `order.created`:
+
+1. `inbox.Claim(tx, "payment", eventID)` — duplikat → skip
+2. Lock order row
+3. Simulasikan charge (default success; payload bisa `simulateOutcome`)
+4. Insert `payments` (unique `order_id + idempotency_key`)
+5. Transition status + commit/release reservation + **ledger**
+6. Enqueue outbox `order.paid` atau `order.payment_failed`
+
+Manual alternatif dari API: `POST /orders/:id/pay`.
+
+---
+
+## Inventory — `internal/worker/inventory/`
+
+| Event | Efek |
+|-------|------|
+| `order.paid` / `fulfilled` | Commit reservation `held` → `committed` (+ ledger `commit`) |
+| `order.cancelled` / `payment_failed` | Release: stock += qty, status `released` (+ ledger `release`) |
+
+Idempotent: inbox + hanya baris berstatus `held` yang diubah.
+
+---
+
+## Audit — `internal/worker/audit/`
+
+Tetap pola lama, diperkeras:
+
+| Symbol | Fungsi |
 |--------|--------|
-| `NewMongoStore` | Collection audit di DB config |
-| `Insert` | Insert satu `Record` |
-| `EnsureIndexes` | Unique `eventId` |
-| `ListRecent` / `Count` | Dipakai lab API |
+| `Record` | Dokumen Mongo (`eventId`, type, payload, …) |
+| `Handle` | Retry insert 3x → DLQ |
+| `MongoStore.Insert` | **Duplicate `eventId` = sukses** (idempotent ack) |
 
-Index unique `eventId` mencegah dokumen audit dobel. Saat ini `Insert` **meneruskan** error duplicate key ke caller — artinya re-delivery bisa masuk retry lalu DLQ. Saat belajar, bandingkan komentar `EnsureIndexes` dengan perilaku `Insert`; perbaikan umum di industri: treat duplicate key sebagai sukses (idempotent ack).
-
----
-
-## Metrics worker
-
-Proses worker expose `/metrics` di `METRICS_PORT` (bukan port HTTP API).  
-Counter event consumed / dead-lettered diisi dari path publish/consume (lihat pemanggilan `metrics.*` di codebase).
+Poison (ID kosong) → DLQ tanpa buang retry Mongo.
 
 ---
 
-## Latihan praktek
+## At-least-once checklist
 
-1. `POST /api/v1/lab/kafka/ping` → log worker `audited` → `GET /lab/mongo/events`.
-2. Matikan Mongo sebentar → lihat retry / DLQ di log.
-3. Bandingkan group id worker vs notifier di config.
+1. Commit Kafka offset **hanya** jika `dispatch.Handle` return nil.
+2. Crash setelah side effect + sebelum commit → redelivery.
+3. Inbox / unique keys / reservation status mencegah efek dobel.
+
+---
+
+## Latihan
+
+1. `POST /lab/kafka/ping` → log worker → `GET /lab/mongo/events`.
+2. Create order → tunggu status `paid` → cek `stock_ledger` di Postgres.
+3. Kill worker mid-flight → pastikan order tetap konsisten setelah restart.
 
 Lanjut → [08-alur-end-to-end.md](08-alur-end-to-end.md)

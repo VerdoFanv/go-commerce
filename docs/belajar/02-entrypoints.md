@@ -1,51 +1,43 @@
 # 02 — Entrypoints (`cmd/api` & `cmd/worker`)
 
-Tujuan: paham **proses hidup** aplikasi — siapa yang di-construct, kapan migrate, kapan listen, kapan shutdown.
+Tujuan: paham **proses hidup** — siapa di-construct, kapan migrate, kapan relay/consume, kapan shutdown.
 
-Kedua binary pakai **Uber fx**: kamu daftar constructor (`fx.Provide`), fx resolve dependency graph, lalu `fx.Invoke` lifecycle.
+Kedua binary pakai **Uber fx**.
 
 ---
 
 ## `cmd/api/main.go` — proses API
 
-### Yang dilakukan `main()`
+### `main()`
 
-1. `godotenv.Load()` — baca `.env` (lokal); di k8s env sudah di-inject.
-2. `fx.New(...).Run()` — bangun graph + block sampai SIGINT/SIGTERM.
+1. `godotenv.Load()` (lokal; di k8s env sudah inject).
+2. `fx.New(...).Run()` sampai SIGINT/SIGTERM.
 
-### Graph yang di-Provide (ringkas)
+### Graph (ringkas)
 
 | Grup | Constructor | Hasil |
 |------|-------------|--------|
 | Config | `config.Load` | `Config` |
-| Platform | `database.Connect`, `redis.Connect`, `mongo.Connect`, `typesense.Connect`, `telemetry.Setup` | client infra |
-| Kafka | `NewProducer(products)`, `NewConsumer(notifier group)` | publish + consume di proses API |
-| Adapter iface | Producer → `product.EventPublisher` / `lab.EventPublisher`; Typesense → `SearchEngine` | service tidak import kafka/typesense konkret |
-| Domain HTTP | `auth|product|wishlist|lab` NewRepository → NewService → NewHandler | fitur |
-| Ops | `health.NewHandler`, `notify` Hub/Notifier/Handler | probe + WS |
-| Server | `server.NewEngine`, `server.NewHTTPServer` | Gin + `net/http.Server` |
+| Platform | `database`, `redis`, `mongo`, `typesense`, `telemetry` | client infra |
+| Kafka | Producer (products topic), Consumer (notifier group) | publish + WS consume |
+| Outbox | `outbox.NewWriter`, `outbox.NewRelay(db, producer)` | TX enqueue + poll publish |
+| HTTP features | auth / product / wishlist / **order** / lab | handlers |
+| Ops | health, notify hub/notifier | probes + WS |
+| Server | `server.NewEngine`, `NewHTTPServer` | Gin |
 
-### Lifecycle `registerLifecycle`
+### Lifecycle OnStart
 
-**OnStart (urutannya penting):**
+1. `database.Migrate` — **hanya API** (termasuk `000005` commerce, `000006` inbox/ledger).
+2. `kafka.EnsureTopics`.
+3. `go notifier.Run` — group notifier → WebSocket.
+4. `go relay.Run` — publish `outbox_events` yang belum `published_at`.
+5. `go ListenAndServe`.
 
-1. `database.Migrate(db)` — jalankan SQL migrations (hanya API yang migrate).
-2. `kafka.EnsureTopics(...)` — pastikan topic ada (dev convenience).
-3. `go notifier.Run(...)` — consumer group **notifier** → WebSocket.
-4. `go httpServer.ListenAndServe()` — terima traffic.
+OnStop: cancel notifier + relay → `http.Shutdown` → close clients.
 
-**OnStop:**
+### Kenapa relay di API?
 
-1. Cancel notifier.
-2. `httpServer.Shutdown` — graceful (zero-downtime drain).
-3. Close Kafka consumer/producer, Mongo, Redis, SQL.
-4. `telemetry.Shutdown`.
-
-### Kenapa notifier ada di API, bukan worker?
-
-- Worker fokus **audit durable** (Mongo + DLQ).
-- Notifier fokus **push real-time** ke client yang sedang connect ke API.
-- Satu topic, **dua consumer group** berbeda = dua tanggung jawab.
+Order menulis outbox di Postgres. Relay harus jalan selama API hidup supaya event keluar ke Kafka. Worker **tidak** migrate dan tidak wajib punya relay (tapi menulis outbox payment hasil charge — API relay yang publish).
 
 ---
 
@@ -55,34 +47,35 @@ Kedua binary pakai **Uber fx**: kamu daftar constructor (`fx.Provide`), fx resol
 
 | Provide | Fungsi |
 |---------|--------|
-| `config.Load` | env |
-| `mongo.Connect` → `audit.NewMongoStore` → `audit.Store` | sink audit |
-| `kafka.NewConsumer(products, group=worker)` | baca event |
-| `kafka.NewProducer(DLQ topic)` | kirim pesan gagal |
-| `audit.NewProcessor` | business worker |
+| `database.Connect` | Postgres untuk payment/inventory/inbox/ledger |
+| `mongo` → `audit.MongoStore` | audit trail |
+| `outbox.NewWriter` | payment enqueue `order.paid` / `payment_failed` |
+| `payment.NewHandler`, `inventory.NewHandler` | side effects bisnis |
+| `kafka.Consumer` (worker group) + DLQ `Producer` | consume / dead-letter |
+| `audit.NewProcessor` + `dispatch.NewProcessor` | route lalu audit |
 
-### Lifecycle
+### Loop
 
-**OnStart:**
+```text
+Fetch → dispatch.Handle (commerce dulu, lalu audit) → Commit jika nil
+```
 
-1. `EnsureTopics`.
-2. `store.EnsureIndexes` — unique `eventId` (idempotent audit).
-3. Listen `:METRICS_PORT` untuk Prometheus (`/metrics`).
-4. Loop: `Fetch` → `processor.Handle` → `Commit` (hanya jika Handle sukses).
+`dispatch` memanggil:
 
-**OnStop:** stop loop, shutdown metrics server, close consumer/DLQ/mongo.
+- `order.created` → payment (inbox claim → charge → outbox)
+- `order.paid` / `cancelled` / `payment_failed` → inventory (inbox + ledger)
+- selalu → audit Mongo (duplicate `eventId` = sukses)
 
 ### At-least-once
 
-Offset **tidak** di-commit sebelum side effect (Mongo insert) sukses.  
-Kalau crash setelah insert tapi sebelum commit → message bisa diproses lagi → unique `eventId` mencegah duplikat dokumen.
+Offset commit **setelah** handler sukses. Redelivery aman karena inbox + unique payment key + status reservation.
 
 ---
 
 ## Latihan
 
-1. Di `cmd/api/main.go`, hitung berapa `fx.Provide` — cocokkan dengan tabel di atas.
-2. Matikan sementara `EnsureTopics` di log — apa yang terjadi kalau topic belum ada?
-3. Bandingkan consumer group string: API pakai `KafkaGroupNotifier`, worker pakai `KafkaGroupWorker`.
+1. Cocokkan `fx.Provide` di `cmd/api` dengan tabel di atas (cari `order.`, `outbox.`).
+2. Pause relay lewat lab — create order — pastikan pending outbox naik.
+3. Bandingkan group: `KafkaGroupNotifier` vs `KafkaGroupWorker`.
 
 Lanjut → [03-shared-core.md](03-shared-core.md)

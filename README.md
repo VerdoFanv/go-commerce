@@ -15,14 +15,17 @@ This repo is a **personal portfolio** backend: not a thin CRUD demo, but archite
 
 It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credible production patterns without needing a 100-node cluster.
 
+Beyond infra, it also labs **commerce reliability** problems found in large systems: order state machine, inventory hold, payment choreography, transactional outbox, consumer inbox, stock ledger, and a live failure matrix.
+
 **Guides:** [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
 ## Why this stack
 
-- **Event-driven** — Kafka domain events → worker audit in MongoDB + WebSocket fan-out
-- **Reliability** — retries, Dead Letter Queue, circuit breaker on search, graceful shutdown
+- **Event-driven** — Kafka domain events → worker (payment / inventory / audit) + WebSocket fan-out
+- **Reliability** — transactional outbox, consumer inbox, retries, DLQ, search circuit breaker, graceful shutdown
+- **Commerce lab** — orders, stock holds, payment simulator, idempotency keys, failure-matrix endpoints
 - **Observability** — Prometheus / Grafana / OpenTelemetry / Loki (opt-in)
 - **Polyglot persistence** — PostgreSQL + Redis + MongoDB + Typesense
 - **Security** — JWT + RBAC, rate limiting, API key gate, OWASP headers; secrets from env / K8s Secret
@@ -34,7 +37,9 @@ It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credibl
 
 | Choice | What you gain |
 | ------ | ------------- |
-| **PostgreSQL as source of truth** | Strong consistency for users/products; clear ownership of business data |
+| **PostgreSQL as source of truth** | Strong consistency for users/products/**orders**; clear ownership of business data |
+| **Transactional outbox** | Order writes stay correct when Kafka is down — events publish later, not lost |
+| **Consumer inbox + stock ledger** | Duplicate Kafka deliveries do not double-charge or corrupt inventory; stock moves are auditable |
 | **Redis** | Lower latency on hot reads; built-in sliding-window rate limiting across replicas |
 | **Kafka + worker** | Decoupled side effects, durable event log, consumer groups, DLQ for poison messages |
 | **MongoDB audit** | Immutable event history for debugging, compliance demos, and “what happened” timelines |
@@ -43,9 +48,9 @@ It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credibl
 | **SQL migrations (golang-migrate)** | Reviewable, ordered, reversible schema changes — same process local → server |
 | **k3s (app tier)** | Self-healing pods, rolling updates, HPA, readiness-based traffic — real deploy muscle |
 | **GitLab CI + Container Registry** | Repeatable lint/test/build/scan/push; optional automated release |
-| **Observability plane** | You can *show* RED metrics, traces, and logs — not only claim them |
+| **Observability plane** | You can *show* RED metrics, traces, outbox lag, and logs — not only claim them |
 
-**Interview angle:** you can explain *why* each store exists and how traffic flows through the system — the positive signal this portfolio is built for.
+**Interview angle:** you can explain *why* each store exists, how an order survives broker outages, and how traffic flows — the positive signal this portfolio is built for.
 
 ---
 
@@ -86,10 +91,11 @@ flowchart LR
     API -->|search| TS[(Typesense)]
     API -->|index docs| TS
 
-    API -->|publish product.*| Kafka{{Kafka<br/>products.events}}
+    API -->|outbox relay + product publish| Kafka{{Kafka<br/>products.events}}
 
     Kafka -->|consumer group: notifier| API
-    Kafka -->|consumer group: worker| Worker[cmd/worker]
+    Kafka -->|consumer group: worker| Worker[cmd/worker<br/>dispatch]
+    Worker -->|payment / inventory| PG
     Worker -->|retry 3x, backoff| Worker
     Worker -->|exhausted| DLQ{{products.events.dlq}}
     Worker -->|immutable audit docs| Mongo[(MongoDB<br/>event_audit)]
@@ -100,8 +106,20 @@ flowchart LR
     Prom --> Grafana[/Grafana/]
 ```
 
+**Two publish paths (important for interviews):**
+
+| Path | How events leave the API | When Kafka is down |
+| ---- | ------------------------ | ------------------ |
+| **Product CRUD** | Fire-and-forget `publishAsync` after DB commit | Event may be lost (demo of the dual-write problem) |
+| **Orders (commerce)** | Same Postgres TX writes order + `outbox_events`; API **outbox relay** publishes later | `POST /orders` still **201** — pending rows visible via `/lab/outbox/pending` |
+
 **Request path** (`POST /api/v1/products`):
 `recover → requestid → OTel → Prometheus RED → security → CORS → timeout → logger → apikey → rate limit → JWT → handler → service → PostgreSQL` → async: cache, Typesense, Kafka.
+
+**Order path** (`POST /api/v1/orders` + `Idempotency-Key`):
+same middleware → hold stock + order + outbox in **one TX** → relay → worker payment → inventory commit → audit Mongo.
+
+Deep dive (ID): [`docs/belajar/09-commerce-reliability.md`](docs/belajar/09-commerce-reliability.md).
 
 ---
 
@@ -114,10 +132,12 @@ flowchart LR
 | DI | Uber **fx** |
 | RDBMS | PostgreSQL + GORM + **golang-migrate** (SQL files) |
 | Cache / rate limit | Redis + `redis_rate` |
-| Events | Kafka (KRaft) + `segmentio/kafka-go` |
+| Events | Kafka (KRaft) + `segmentio/kafka-go` + **transactional outbox** |
+| Reliability | Consumer **inbox**, stock **ledger**, DLQ, Typesense circuit breaker |
 | Audit | MongoDB |
 | Search | Typesense + circuit breaker |
 | Real-time | WebSocket (`gorilla/websocket`) |
+| Commerce | Orders / inventory reservations / payment simulator / fulfill |
 | CI/CD | **GitLab CI** → Container Registry + Trivy (optional auto-deploy) |
 | Deploy | Docker Compose (data plane) + **k3s** / Helm (app tier) |
 
@@ -183,9 +203,13 @@ make obs-down
 
 Prefer host processes? `make infra-up`, then `make api` + `make worker`.
 
-### Admin account (migration 000002)
+### Demo accounts (migrations)
 
-`admin@golang-be.dev` / `admin123` — role `admin` can delete any product (RBAC demo).
+| Email | Password | Notes |
+| ----- | -------- | ----- |
+| `admin@golang-be.dev` | `admin123` | RBAC — can delete any product |
+| `seller@golang-be.dev` | `seller123` | Owns demo catalog |
+| `buyer@golang-be.dev` | `user123` | Use for wishlist + **orders** |
 
 ---
 
@@ -201,17 +225,24 @@ All `/api/v1` routes require `apikey`; protected routes also need `Authorization
 | ------ | ---- | ---- | ----- |
 | `GET` | `/health/live` | — | Liveness |
 | `GET` | `/health/ready` | — | Readiness (PG/Redis/Mongo/Typesense) |
-| `GET` | `/metrics` | — | Prometheus |
+| `GET` | `/metrics` | — | Prometheus (includes `golangbe_outbox_pending`) |
 | `POST` | `/api/v1/authentication/register` | apikey | Create account |
 | `POST` | `/api/v1/authentication/login` | apikey | Issue tokens |
 | `POST` | `/api/v1/authentication/refresh-token` | apikey | Rotate tokens |
 | `GET` | `/api/v1/authentication/me` | +bearer | Current user |
 | `GET` | `/api/v1/products` | +bearer | Cursor pagination + cache |
 | `GET` | `/api/v1/products/search?q=` | +bearer | Typesense full-text |
-| `POST` | `/api/v1/products` | +bearer | Create → Kafka event |
+| `POST` | `/api/v1/products` | +bearer | Create → Kafka event (async) |
 | `GET`/`PUT`/`DELETE` | `/api/v1/products/:id` | +bearer | Detail / update / delete |
 | `GET`/`POST`/`DELETE` | `/api/v1/wishlists` | +bearer | Wishlist (+ Redis count) |
-| `GET`/`POST` | `/api/v1/lab/*` | +bearer | Infra learning endpoints |
+| `POST` | `/api/v1/orders` | +bearer + **Idempotency-Key** | Create order (TX outbox + stock hold) |
+| `GET` | `/api/v1/orders` / `/:id` | +bearer | List / detail |
+| `POST` | `/api/v1/orders/:id/cancel` | +bearer | Cancel + release stock |
+| `POST` | `/api/v1/orders/:id/pay` | +bearer | Payment simulator (`success\|fail\|timeout`) |
+| `POST` | `/api/v1/orders/:id/fulfill` | +bearer | `paid` → `fulfilled` |
+| `GET` | `/api/v1/lab/commerce/failure-matrix` | +bearer | Live failure-matrix doc |
+| `GET`/`POST` | `/api/v1/lab/outbox/*` | +bearer | Pending / pause / resume / relay-once |
+| `GET`/`POST`/`DELETE` | `/api/v1/lab/*` | +bearer | Infra learning endpoints |
 | `GET` | `/ws/products?token=` | JWT | Real-time events |
 
 Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
@@ -222,24 +253,29 @@ Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
 
 ```text
 cmd/
-  api/                      HTTP API process (Gin + fx)
-  worker/                   Kafka worker process (fx)
+  api/                      HTTP API process (Gin + fx) — migrate, outbox relay, notifier
+  worker/                   Kafka worker (fx) — dispatch → payment / inventory / audit
 
 internal/
   http/                     ★ everything for the API process
     server/                 Gin engine wiring
     middleware/             auth, apikey, ratelimit, ...
     health/                 /health/live|ready
-    auth|product|wishlist|lab/
+    auth|product|wishlist|order|lab/
     notify/                 WebSocket + Kafka notifier
   worker/                   ★ everything for the worker process
-    audit/                  consume → Mongo audit + DLQ
-  domain/                   shared entities + errors
+    dispatch/               route events by type
+    payment/                order.created → simulate pay → outbox
+    inventory/              commit / release reservations (+ inbox)
+    audit/                  Mongo audit + DLQ
+  domain/                   shared entities + errors + order state machine
   config/                   shared env config
-  platform/                 shared infra adapters
+  platform/                 db, redis, kafka, mongo, typesense, telemetry,
+                            outbox, inbox, ledger
   metrics/                  shared Prometheus metrics
 
-migrations/                 versioned SQL
+migrations/                 000001…000006 (commerce + inbox/ledger)
+scripts/load-orders.sh      concurrency / oversell demo
 k8s/ helm/                  deploy
 .gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
 docs/                       OpenAPI, belajar/ (code), PANDUAN (ops), GitLab, public access
@@ -266,6 +302,9 @@ make ci                 # local CI-equivalent checks
 make docker-up
 make load-smoke
 make load-test
+
+# Commerce concurrency (oversell must not go negative)
+API=http://127.0.0.1:8080 API_KEY=... TOKEN=... PRODUCT_ID=1 N=20 ./scripts/load-orders.sh
 ```
 
 ---
@@ -300,9 +339,14 @@ helm install golang-be ./helm/golang-be -n golang-be --create-namespace \
 
 ## Design decisions worth reading
 
-- **Migrations over AutoMigrate** — reviewed, ordered, reversible SQL
-- **At-least-once + idempotent sink** — commit after Mongo write; unique `eventId`
+- **Migrations over AutoMigrate** — reviewed, ordered, reversible SQL (`000001`…`000006`)
+- **Outbox for critical paths** — orders never depend on Kafka being up at request time
+- **Product async publish kept on purpose** — contrast with outbox; teach the dual-write failure mode
+- **At-least-once + inbox / unique sinks** — Kafka redelivery must not double-pay or double-release stock
+- **Stock ledger** — every hold/release/commit is an append-only movement
 - **Circuit breaker on search** — Typesense outage does not kill CRUD
 - **Fail-open rate limiter** — Redis blip never blocks all traffic
-- **Async side effects** — Kafka/Typesense do not inflate HTTP latency
+- **Async side effects on product** — Kafka/Typesense do not inflate HTTP latency
 - **Config validation at boot** — misconfig fails fast, including production secret guards
+
+Learning path (Bahasa Indonesia): start at [`docs/belajar/README.md`](docs/belajar/README.md).
