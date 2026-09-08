@@ -1,104 +1,144 @@
-# Setup GitLab untuk repo ini
+# GitLab setup — two delivery modes
 
-Langkah di akun GitLab kamu (sekali saja).
+You can use **either** mode (or both):
 
-## 1. Buat project
+| Mode | Name | You do | Pipeline does |
+| ---- | ---- | ------ | ------------- |
+| **A** | Self-deploy | Build + import images on the Ubuntu server, `kubectl apply` / rollout | Optional: only lint/test on push (no deploy) |
+| **B** | GitLab CI/CD | Push / tag; click **Play** on deploy when ready | Lint → test → build → Trivy → push registry → (manual) deploy |
 
-1. Buka [gitlab.com](https://gitlab.com) → **New project** → **Create blank project** (atau import dari GitHub).
-2. Nama: `golang-be` (bebas).
-3. Visibility: **Private** (disarankan untuk porto + secrets).
+Mode A is best for daily lab work. Mode B is best for clean releases and the portfolio “pipeline” story.
 
-## 2. Push kode ke GitLab
+---
 
-Di mesin lokal (ganti URL):
+## One-time: create the GitLab project
+
+1. Open [gitlab.com](https://gitlab.com) → **New project** → blank project (or import).
+2. Name: `golang-be`. Visibility: **Private** recommended.
+3. Default branch: `main`.
+
+### Push from your Mac
 
 ```bash
 cd ~/Project/golang-be
-git remote rename origin github   # opsional, kalau masih ada GitHub
 git remote add gitlab git@gitlab.com:<username>/golang-be.git
-# atau HTTPS:
-# git remote add gitlab https://gitlab.com/<username>/golang-be.git
+# or: https://gitlab.com/<username>/golang-be.git
 
 git push -u gitlab HEAD:main
 ```
 
-Kalau repo baru kosong, pastikan branch default = `main` (Settings → Repository → Default branch).
+### Enable CI runners + registry
 
-## 3. Aktifkan Container Registry
-
-1. **Settings → General → Visibility** → pastikan Container Registry **enabled**.
-2. Image yang di-push pipeline `release`:
+1. **Settings → CI/CD → Runners** → enable **shared runners** (or install a self-hosted runner on the lab box).
+2. **Settings → General → Visibility** → **Container Registry** enabled.
+3. Images (Mode B release):
    - `registry.gitlab.com/<username>/golang-be/api:latest`
    - `registry.gitlab.com/<username>/golang-be/worker:latest`
 
-## 4. CI/CD Variables (secrets — JANGAN taruh di kode)
+---
 
-**Settings → CI/CD → Variables → Add variable**
+## Mode A — Self-deploy (no GitLab deploy required)
 
-| Key | Value | Flags |
-|-----|--------|-------|
-| (opsional) `DOCKER_AUTH_CONFIG` | hanya kalau registry eksternal | Masked |
-
-Untuk push ke GitLab Registry, job `release` sudah pakai `CI_REGISTRY_*` bawaan — biasanya **tidak perlu** variable tambahan.
-
-Kalau nanti deploy otomatis ke server (opsional lanjutan):
-
-| Key | Contoh | Protected | Masked |
-|-----|--------|-----------|--------|
-| `SSH_PRIVATE_KEY` | isi private key deploy | ✅ | ✅ |
-| `DEPLOY_HOST` | `192.168.0.155` | ✅ | |
-| `K3S_KUBECONFIG` | isi kubeconfig (base64) | ✅ | ✅ |
-
-Jangan simpan password DB/JWT di CI Variables kecuali job deploy memang butuh — runtime secrets tetap di server (`k8s/secret.yaml` / sealed-secrets), bukan di repo.
-
-## 5. Runner
-
-- **GitLab.com Shared Runners**: Settings → CI/CD → Runners → pastikan **Enable shared runners** ON.
-- Atau pasang [self-hosted runner](https://docs.gitlab.com/runner/) di Ubuntu lab kalau mau hemat menit CI.
-
-## 6. Cek pipeline
-
-1. Push ke `main` atau buka Merge Request.
-2. **Build → Pipelines** — harus hijau: `lint` → `test` → `build` / `docker`.
-3. Tag `v0.1.0` → job `release` push image ke registry.
+Pipeline can still run lint/test when you push — that is fine. You deploy yourself:
 
 ```bash
-git tag v0.1.0
-git push gitlab v0.1.0
+# SSH to the Ubuntu lab box
+cd ~/projects/golang-be
+git pull   # or rsync from Mac
+
+KAFKA_HOST_ADVERTISE=$(hostname -I | awk '{print $1}') make infra-up   # if needed
+
+docker build --target api    -t golang-be-api:local    .
+docker build --target worker -t golang-be-worker:local .
+docker save golang-be-api:local    -o /tmp/api.tar
+docker save golang-be-worker:local -o /tmp/worker.tar
+sudo k3s ctr images import /tmp/api.tar
+sudo k3s ctr images import /tmp/worker.tar
+
+sudo k3s kubectl apply -f k8s/namespace.yaml -f k8s/configmap.yaml -f k8s/secret.yaml
+sudo k3s kubectl apply -f k8s/api-deployment.yaml -f k8s/api-service.yaml \
+  -f k8s/api-hpa.yaml -f k8s/api-ingress.yaml -f k8s/worker-deployment.yaml
+sudo k3s kubectl -n golang-be rollout restart deploy/api deploy/worker
+sudo k3s kubectl -n golang-be rollout status deploy/api
 ```
 
-## 7. Deploy image GitLab ke k3s (server)
+Manifests already use `golang-be-*:local` + `imagePullPolicy: IfNotPresent`.
 
-Setelah image ada di registry:
+**You do not need** registry login or CI Variables for Mode A.
+
+---
+
+## Mode B — GitLab CI/CD (build + optional deploy)
+
+### B1. CI Variables (only what you need)
+
+**Settings → CI/CD → Variables**
+
+| Variable | Required for | Notes |
+| -------- | ------------ | ----- |
+| *(none)* | lint/test/build/release to GitLab Registry | Uses built-in `CI_JOB_TOKEN` / `CI_REGISTRY_*` |
+| `SSH_PRIVATE_KEY` | Manual **deploy** job | Deploy user SSH key; **Masked + Protected** |
+| `DEPLOY_HOST` | Manual **deploy** job | e.g. `192.168.0.155` or future public IP |
+| `DEPLOY_USER` | Manual **deploy** job | e.g. `verdo` |
+| `CI_REGISTRY_USER` / `CI_REGISTRY_PASSWORD` | Usually auto | Override only if using an external registry |
+
+Do **not** put DB passwords / JWT in CI Variables unless a job truly needs them. Runtime secrets stay on the server in `k8s/secret.yaml`.
+
+### B2. What the pipeline does
+
+| Job | Stage | When |
+| --- | ----- | ---- |
+| `lint` / `test` / `build` | every branch & MR | Always |
+| `docker` | build + Trivy | Always |
+| `release` | push images to GitLab Registry | `main` or tags |
+| `deploy` | SSH to server, pull/import, rollout | **manual** (`when: manual`) on `main`/tags |
+
+### B3. Release + deploy flow
 
 ```bash
-# Login sekali di server (Personal Access Token dengan scope read_registry)
-docker login registry.gitlab.com
+git push gitlab main
+# Pipelines → wait for green → open the pipeline → click ▶ on "deploy" when you want
 
-# Atau buat imagePullSecret di k3s:
+# Or tag a release:
+git tag v0.1.0 && git push gitlab v0.1.0
+```
+
+### B4. Server prep for Mode B (once)
+
+On the Ubuntu box, allow the GitLab deploy key / your SSH key, and create a pull secret if images are private:
+
+```bash
+# Personal Access Token with read_registry
 sudo k3s kubectl -n golang-be create secret docker-registry gitlab-registry \
   --docker-server=registry.gitlab.com \
   --docker-username=<gitlab-user> \
   --docker-password=<pat> \
-  --docker-email=<email>
-
-# Edit deployment image:
-#   registry.gitlab.com/<user>/golang-be/api:latest
-#   imagePullPolicy: Always
-#   imagePullSecrets: [gitlab-registry]
+  --docker-email=<email> \
+  --dry-run=client -o yaml | sudo k3s kubectl apply -f -
 ```
 
-Untuk lab harian, **Option A (build lokal + `k3s ctr import`)** tetap paling simpel (lihat README / PANDUAN).
+When switching manifests from `:local` to registry images, set:
 
-## 8. Matikan GitHub Actions (opsional)
+- `image: registry.gitlab.com/<user>/golang-be/api:latest`
+- `imagePullPolicy: Always`
+- `imagePullSecrets: [{name: gitlab-registry}]`
 
-Folder `.github/workflows/` sudah diganti konsepnya oleh `.gitlab-ci.yml`.  
-Kalau remote GitHub masih ada, hapus workflows di GitHub atau archive repo supaya tidak double CI.
+(or keep Mode A local tags and let the deploy job import tarballs — see `scripts/deploy-from-registry.sh`).
 
-## 9. Checklist keamanan
+---
 
-- [ ] Project Private  
-- [ ] Tidak ada password production di commit  
-- [ ] `k8s/secret.yaml` di `.gitignore`  
-- [ ] PAT registry hanya `read_registry` / `write_registry` sesuai kebutuhan  
-- [ ] Protected variables hanya di protected branches/tags  
+## Switching between modes
+
+- **Daily coding:** Mode A (fast feedback on LAN).
+- **Show portfolio / tag release:** Mode B (green pipeline + registry images).
+- You can push to GitLab every day (Mode B lint/test) while still self-deploying with Mode A — no conflict.
+
+---
+
+## Security checklist
+
+- [ ] Project Private
+- [ ] `k8s/secret.yaml` never committed
+- [ ] Deploy key / PAT scoped minimally
+- [ ] Protected + Masked variables for secrets
+- [ ] Rotate lab API keys if the box becomes public ([PUBLIC-ACCESS.md](PUBLIC-ACCESS.md))

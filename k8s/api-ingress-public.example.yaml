@@ -1,0 +1,35 @@
+# Example Ingress for a real domain + optional TLS.
+# Copy/adapt — do not apply until DNS points at this host.
+#
+#   export DOMAIN=api.yourdomain.com
+#   envsubst < k8s/api-ingress-public.example.yaml | sudo k3s kubectl apply -f -
+#
+# For TLS, cert-manager ClusterIssuer "letsencrypt-prod" must exist
+# (see k8s/cert-manager-letsencrypt.yaml and docs/PUBLIC-ACCESS.md).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-public
+  namespace: golang-be
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    # Uncomment when cert-manager is installed and DNS is ready:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  # Uncomment TLS block when using cert-manager:
+  # tls:
+  #   - hosts:
+  #       - ${DOMAIN}
+  #     secretName: golang-be-tls
+  rules:
+    - host: ${DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http

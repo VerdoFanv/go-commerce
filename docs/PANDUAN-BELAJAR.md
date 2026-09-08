@@ -39,7 +39,8 @@ Baca sambil praktek. Jangan hanya scroll.
 | Swagger | http://192.168.0.155/docs |
 | Metrics | http://192.168.0.155/metrics |
 
-Header wajib di `/api/v1`: `apikey: dev-api-key`
+Header wajib di `/api/v1`: `apikey` dari `.env` / `k8s/secret.yaml`  
+(di server lab saat ini: `lab-api-key-change-in-prod` — **bukan** nilai yang di-commit ke git)
 
 Opsional di Mac `/etc/hosts`:
 

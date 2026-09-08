@@ -1,6 +1,6 @@
 # Golang BE
 
-**Production-grade, event-driven REST API** built with Go — portfolio pribadi yang meniru arsitektur mid-to-large backend: polyglot persistence, event streaming + DLQ, observability, dan CI/CD.
+**Production-grade, event-driven REST API** built with Go — a personal portfolio backend that mirrors mid-to-large system design: polyglot persistence, event streaming with DLQ, full observability, and flexible delivery (self-deploy **or** GitLab CI/CD).
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Gin](https://img.shields.io/badge/HTTP-Gin-00ADD8)](https://gin-gonic.com/)
@@ -9,65 +9,68 @@
 
 ---
 
-## Tujuan proyek (portfolio)
+## Portfolio goal
 
-Repo ini dibuat sebagai **porto pribadi** untuk menunjukkan kemampuan membangun backend “kelas menengah ke atas”: bukan CRUD tipis, tapi keputusan arsitektur yang mirip yang dipakai di produk nyata (event-driven, polyglot DB, worker, k8s, observability).
+This repo is a **personal portfolio** backend: not a thin CRUD demo, but architecture decisions you would discuss in interviews for mid/senior backend roles (event-driven flows, workers, Kubernetes rollouts, observability).
 
-Bukan berarti harus jalan di cluster 100 node — **right-sized**: satu box Ubuntu + k3s + Docker Compose sudah cukup untuk demo yang kredibel.
+It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credible production patterns without needing a 100-node cluster.
 
-**Dokumen belajar praktis:** [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md) · **Setup GitLab:** [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md)
+**Guides:** [Learning guide (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
-## Why this project exists
+## Why this stack
 
-- **Event-driven** — domain events lewat **Kafka** → worker → audit **MongoDB** + fan-out **WebSocket**
-- **Reliability** — retry + **DLQ**, circuit breaker search, graceful shutdown
-- **Observability** — Prometheus / Grafana / OTel / Loki (opt-in)
+- **Event-driven** — Kafka domain events → worker audit in MongoDB + WebSocket fan-out
+- **Reliability** — retries, Dead Letter Queue, circuit breaker on search, graceful shutdown
+- **Observability** — Prometheus / Grafana / OpenTelemetry / Loki (opt-in)
 - **Polyglot persistence** — PostgreSQL + Redis + MongoDB + Typesense
-- **Security** — JWT + RBAC, rate limit, API key, OWASP headers; secrets via env/K8s Secret (bukan hardcoded)
-- **Delivery** — **GitLab CI** (lint → test → build → Trivy → registry) + **k3s** zero-downtime rolling update
-- **Right-sized** — hardware terbatas (≈4-core / 8GB)
+- **Security** — JWT + RBAC, rate limiting, API key gate, OWASP headers; secrets from env / K8s Secret
+- **Delivery** — GitLab CI **and/or** manual deploy to k3s with zero-downtime rolling updates
 
 ---
 
-## Impact & trade-off stack ini
+## Positive impact of this stack
 
-| Keputusan | Manfaat (porto / skill) | Biaya / dampak |
-|-----------|-------------------------|----------------|
-| Banyak datastore (PG + Redis + Mongo + Typesense) | Tunjukkan *polyglot persistence* & bounded context | RAM/ops lebih berat; lebih banyak failure mode |
-| Kafka + worker | Event-driven, DLQ, consumer group | Operational complexity; butuh advertise listener benar di LAN/k8s |
-| k3s app tier | Deploy/rolling update / HPA mirip produksi | Belajar Kubernetes wajib; image import/registry |
-| Observability plane | Metrics/traces/logs “production story” | CPU/RAM — maka **opt-in** (`make obs-up`) |
-| Gin + clean architecture | Standar industri Go HTTP; testable | Lebih banyak file/package daripada monolith kecil |
-| SQL migrations (golang-migrate) | Schema history reproducible, reviewable, rollback | Harus disiplin: jangan edit migration yang sudah apply |
+| Choice | What you gain |
+| ------ | ------------- |
+| **PostgreSQL as source of truth** | Strong consistency for users/products; clear ownership of business data |
+| **Redis** | Lower latency on hot reads; built-in sliding-window rate limiting across replicas |
+| **Kafka + worker** | Decoupled side effects, durable event log, consumer groups, DLQ for poison messages |
+| **MongoDB audit** | Immutable event history for debugging, compliance demos, and “what happened” timelines |
+| **Typesense** | Production-style full-text search without overloading Postgres `LIKE` scans |
+| **Gin + clean architecture** | Industry-standard Go HTTP stack; handlers stay thin; services are unit-testable |
+| **SQL migrations (golang-migrate)** | Reviewable, ordered, reversible schema changes — same process local → server |
+| **k3s (app tier)** | Self-healing pods, rolling updates, HPA, readiness-based traffic — real deploy muscle |
+| **GitLab CI + Container Registry** | Repeatable lint/test/build/scan/push; optional automated release |
+| **Observability plane** | You can *show* RED metrics, traces, and logs — not only claim them |
 
-**Kesimpulan porto:** stack “berat” sengaja dipilih supaya wawancara bisa dibahas *mengapa*, bukan hanya *apa library-nya*. Di lab rumah, matikan obs + 1 replica worker bila RAM sempit.
+**Interview angle:** you can explain *why* each store exists and how traffic flows through the system — the positive signal this portfolio is built for.
 
 ---
 
-## Migrations: kenapa file `.sql`?
+## Migrations: why `.sql` files?
 
-**Ya — ini praktik production-grade.**
+**Yes — this is production-grade practice.**
 
-- **golang-migrate** + file `migrations/00000N_*.up.sql` / `.down.sql` = source of truth schema.
-- Bisa di-review di MR, dijalankan otomatis saat API boot (`database.Migrate`), dan di-rollback di lingkungan controlled.
-- **Bukan** GORM `AutoMigrate` di production: sulit audit, sulit rollback, mudah drift antar environment.
+- `golang-migrate` + `migrations/00000N_*.up.sql` / `.down.sql` is the schema source of truth
+- Reviewable in MRs, applied on API boot (`database.Migrate`), reversible in controlled environments
+- Prefer this over GORM `AutoMigrate` in production (harder to audit and roll back)
 
-Alternatif lain yang juga prod-grade (tidak dipakai di repo ini): Atlas, Flyway, Liquibase, sqitch. AutoMigrate hanya layak untuk prototype/throwaway.
+Other solid tools (not used here): Atlas, Flyway, Liquibase. AutoMigrate is fine only for throwaway prototypes.
 
 ---
 
 ## Secrets & config
 
-| Sumber | Isi | Commit? |
-|--------|-----|---------|
-| `.env` (dari `.env.example`) | Dev lokal | ❌ `.gitignore` |
-| `k8s/secret.yaml` (dari `secret.example.yaml`) | Runtime k3s | ❌ `.gitignore` |
-| `k8s/configmap.yaml` | Non-secret (host, ports, topic names) | ✅ (tanpa password) |
-| Kode Go | Hanya *fallback* default untuk local boot | ✅ — **jangan** taruh password production |
+| Source | Contents | Commit? |
+| ------ | -------- | ------- |
+| `.env` (from `.env.example`) | Local development | No (gitignored) |
+| `k8s/secret.yaml` (from `secret.example.yaml`) | Runtime secrets on k3s | No (gitignored) |
+| `k8s/configmap.yaml` | Non-secret config (hosts, ports, topic names) | Yes |
+| Go defaults in `config.Load` | Local boot fallbacks only | Yes — never real production passwords |
 
-Isi credentials dari compose infra / password manager → `.env` / `secret.yaml`. Jangan commit password nyata ke README/panduan.
+Put real credentials in `.env` / `k8s/secret.yaml` / your password manager — not in git.
 
 ---
 
@@ -115,34 +118,33 @@ flowchart LR
 | Audit | MongoDB |
 | Search | Typesense + circuit breaker |
 | Real-time | WebSocket (`gorilla/websocket`) |
-| CI/CD | **GitLab CI** → Container Registry + Trivy |
-| Deploy | Docker Compose (data) + **k3s** / Helm (app) |
+| CI/CD | **GitLab CI** → Container Registry + Trivy (optional auto-deploy) |
+| Deploy | Docker Compose (data plane) + **k3s** / Helm (app tier) |
 
 ---
 
-## Deploy perubahan ke server (prod-grade, zero-downtime)
+## Two delivery modes
 
-Alur yang dipakai di lab k3s (2 replica API, `maxUnavailable: 0`):
+| Mode | When to use | How |
+| ---- | ----------- | --- |
+| **A — Self-deploy** | Day-to-day lab, offline, fastest iteration | Build on the server → `k3s ctr images import` → `kubectl rollout` |
+| **B — GitLab CI/CD** | Clean releases, tags, portfolio “pipeline” story | Push → pipeline builds/scans → push images → optional **manual** deploy job |
 
-1. **Ubah kode** → push GitLab (CI hijau).
-2. **Build image** (CI `release` *atau* di server: `docker build` + `k3s ctr images import`).
-3. **Rollout** — Kubernetes ganti pod satu per satu:
-   - Pod baru harus **Ready** (`/health/ready`) dulu.
-   - `preStop sleep` + `terminationGracePeriodSeconds` drain koneksi.
-   - Traefik hanya kirim traffic ke endpoint Ready.
-4. **Verifikasi** — `kubectl rollout status`, hit `/health/ready`, smoke API.
+Both are first-class. Details: [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md).
+
+### Zero-downtime rollout (k3s)
+
+API deployment uses `replicas: 2`, `maxUnavailable: 0`, readiness `/health/ready`, `preStop` drain, and graceful HTTP shutdown. New pods must be Ready before old pods terminate.
 
 ```bash
-# Lab lokal (paling cepat)
+# Mode A (self-deploy on the Ubuntu box)
 docker build --target api -t golang-be-api:local .
 docker save golang-be-api:local -o /tmp/api.tar && sudo k3s ctr images import /tmp/api.tar
-# (ulangi untuk worker)
+# repeat for worker
 sudo k3s kubectl -n golang-be apply -f k8s/api-deployment.yaml
 sudo k3s kubectl -n golang-be rollout restart deploy/api deploy/worker
 sudo k3s kubectl -n golang-be rollout status deploy/api
 ```
-
-Detail zero-downtime & ops: [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md).
 
 ---
 
@@ -152,7 +154,7 @@ Detail zero-downtime & ops: [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md)
 
 ```bash
 cp .env.example .env
-# Isi DB_*/MONGO_*/API_KEY/JWT_SECRET dari infra lokalmu — jangan commit .env
+# Fill DB_*/MONGO_*/API_KEY/JWT_SECRET from your local infra — never commit .env
 ```
 
 ### 2. Run the core stack
@@ -161,7 +163,7 @@ cp .env.example .env
 make docker-up      # api, worker, kafka, typesense
 ```
 
-Postgres/Redis/MongoDB expected on `shared-net`. Observability opt-in:
+Postgres/Redis/MongoDB are expected on `shared-net`. Observability is opt-in:
 
 ```bash
 make obs-up
@@ -170,109 +172,65 @@ make obs-down
 
 ### 3. Explore
 
-| Service    | URL                           | Credentials                  |
-| ---------- | ----------------------------- | ---------------------------- |
-| API        | http://localhost:8080         | header `apikey: dev-api-key` |
-| Swagger UI | http://localhost:8080/docs    | —                            |
-| Grafana    | http://localhost:3000         | `admin` / `admin`            |
-| Prometheus | http://localhost:9090         | —                            |
-| Jaeger     | http://localhost:16686        | enable `OTEL_ENABLED=true`   |
-| Metrics    | http://localhost:8080/metrics | —                            |
+| Service | URL | Credentials |
+| ------- | --- | ----------- |
+| API | http://localhost:8080 | header `apikey: dev-api-key` |
+| Swagger UI | http://localhost:8080/docs | — |
+| Grafana | http://localhost:3000 | `admin` / `admin` |
+| Prometheus | http://localhost:9090 | — |
+| Jaeger | http://localhost:16686 | set `OTEL_ENABLED=true` |
+| Metrics | http://localhost:8080/metrics | — |
 
-Prefer running the apps on the host? `make infra-up` (infra only), then `make api` + `make worker` in two terminals.
+Prefer host processes? `make infra-up`, then `make api` + `make worker`.
 
-### Admin account (seeded by migration 000002)
+### Admin account (migration 000002)
 
-`admin@golang-be.dev` / `admin123` — role `admin` can delete **any** product (RBAC demo).
+`admin@golang-be.dev` / `admin123` — role `admin` can delete any product (RBAC demo).
 
 ---
 
 ## API overview
 
-All `/api/v1` routes require `apikey` header; protected routes also need `Authorization: Bearer <accessToken>`. Errors carry a stable machine code:
+All `/api/v1` routes require `apikey`; protected routes also need `Authorization: Bearer <accessToken>`.
 
 ```json
 { "success": false, "message": "not found", "errorCode": "RESOURCE_NOT_FOUND" }
 ```
 
-| Method   | Path                                   | Auth    | Notes                                    |
-| -------- | -------------------------------------- | ------- | ---------------------------------------- |
-| `GET`    | `/health/live`                         | —       | Liveness probe                           |
-| `GET`    | `/health/ready`                        | —       | Readiness: pings PG/Redis/Mongo/ES       |
-| `GET`    | `/metrics`                             | —       | Prometheus                               |
-| `POST`   | `/api/v1/authentication/register`      | apikey  | Create account (role: user)              |
-| `POST`   | `/api/v1/authentication/login`         | apikey  | Issue tokens                             |
-| `POST`   | `/api/v1/authentication/refresh-token` | apikey  | Rotate tokens                            |
-| `GET`    | `/api/v1/authentication/me`            | +bearer | Current user (incl. role)                |
-| `GET`    | `/api/v1/products?cursor=&limit=`      | +bearer | **Cursor pagination** + first-page cache |
-| `GET`    | `/api/v1/products/search?q=`           | +bearer | **Elasticsearch** full-text              |
-| `POST`   | `/api/v1/products`                     | +bearer | Create → publishes Kafka event           |
-| `GET`    | `/api/v1/products/:id`                 | +bearer | Detail (Redis cached)                    |
-| `PUT`    | `/api/v1/products/:id`                 | +bearer | Update (owner) → event                   |
-| `DELETE` | `/api/v1/products/:id`                 | +bearer | Delete (owner/**admin**) → event         |
-| `GET`    | `/ws/products?token=`                  | JWT     | WebSocket real-time events               |
+| Method | Path | Auth | Notes |
+| ------ | ---- | ---- | ----- |
+| `GET` | `/health/live` | — | Liveness |
+| `GET` | `/health/ready` | — | Readiness (PG/Redis/Mongo/Typesense) |
+| `GET` | `/metrics` | — | Prometheus |
+| `POST` | `/api/v1/authentication/register` | apikey | Create account |
+| `POST` | `/api/v1/authentication/login` | apikey | Issue tokens |
+| `POST` | `/api/v1/authentication/refresh-token` | apikey | Rotate tokens |
+| `GET` | `/api/v1/authentication/me` | +bearer | Current user |
+| `GET` | `/api/v1/products` | +bearer | Cursor pagination + cache |
+| `GET` | `/api/v1/products/search?q=` | +bearer | Typesense full-text |
+| `POST` | `/api/v1/products` | +bearer | Create → Kafka event |
+| `GET`/`PUT`/`DELETE` | `/api/v1/products/:id` | +bearer | Detail / update / delete |
+| `GET`/`POST`/`DELETE` | `/api/v1/wishlists` | +bearer | Wishlist (+ Redis count) |
+| `GET`/`POST` | `/api/v1/lab/*` | +bearer | Infra learning endpoints |
+| `GET` | `/ws/products?token=` | JWT | Real-time events |
 
 Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
-
-### Cursor pagination
-
-```
-GET /api/v1/products?limit=2            → { data: [...], meta: { nextCursor: 42, hasMore: true } }
-GET /api/v1/products?limit=2&cursor=42  → next page
-```
-
-Keyset pagination — stable under concurrent writes, O(log n) at any depth.
-
-### Try the real-time flow
-
-```bash
-# 1. Login, copy accessToken
-curl -s http://localhost:8080/api/v1/authentication/login \
-  -H 'Content-Type: application/json' -H 'apikey: dev-api-key' \
-  -d '{"email":"admin@golang-be.dev","password":"admin123"}'
-
-# 2. Open a WebSocket (websocat or browser console)
-websocat "ws://localhost:8080/ws/products?token=<accessToken>"
-
-# 3. Create a product — the WS client receives the event instantly
-curl -s http://localhost:8080/api/v1/products \
-  -H 'Content-Type: application/json' -H 'apikey: dev-api-key' \
-  -H "Authorization: Bearer <accessToken>" \
-  -d '{"name":"Kopi Susu","description":"Iced","price":28000,"stock":10}'
-
-# 4. See the audit trail in MongoDB
-docker exec -it golang-be-mongodb-1 mongosh golang_be_audit --eval 'db.event_audit.find().pretty()'
-```
 
 ---
 
 ## Project layout
 
 ```text
-cmd/
-  api/                 fx-wired HTTP service (composition root)
-  worker/              fx-wired Kafka consumer → MongoDB audit + DLQ
-internal/
-  auth/                Register, login, refresh, me (+ role claims)
-  product/             CRUD + cursor pagination + cache + events + search
-  health/              /health/live + /health/ready (dependency probes)
-  notify/              WebSocket hub + Kafka notifier consumer
-  audit/               Worker: retry/backoff/DLQ processor + Mongo store
-  config/              Validated env config (fail-fast on boot)
-  domain/              Entities, sentinel errors, error codes
-  middleware/          auth, rbac, apikey, ratelimit, security, timeout, tracing, logger
-  metrics/             Prometheus RED + business metrics
-  platform/            postgres, redis, kafka, mongo, typesense, telemetry
-  server/              Fiber app assembly (middleware order lives here)
-migrations/            Versioned SQL (embedded into binaries)
-pkg/response/          JSON envelope + validation binder
-deploy → k8s/          Raw manifests (deployment, service, ingress, HPA, probes) — app tier only, k3s-ready
-helm/golang-be/        Helm chart (api + worker + HPA + ingress)
-docker/                Prometheus, Grafana, Loki, Promtail config
-load/                  k6 smoke + ramping load test scripts
-docs/                  OpenAPI + Swagger UI
-test/                  unit/ integration/ mocks/ testutil/
-.github/               CI, CodeQL, release, Dependabot
+cmd/api|worker          Gin API + Kafka worker (fx)
+internal/<feature>/     handler → service → repository
+internal/platform/      postgres, redis, kafka, mongo, typesense, telemetry
+internal/lab/           learning APIs per infra
+migrations/             versioned SQL (embedded)
+k8s/                    k3s manifests (zero-downtime API deploy)
+helm/golang-be/         Helm chart
+.gitlab-ci.yml          GitLab CI (lint/test/build/release/optional deploy)
+docs/                   OpenAPI, learning guide, GitLab + public access guides
+test/                   unit / integration / mocks
 ```
 
 ---
@@ -280,64 +238,58 @@ test/                  unit/ integration/ mocks/ testutil/
 ## Testing & quality
 
 ```bash
-make test               # unit + integration (no infra needed — mocks)
-make test-race          # race detector
-make test-cover         # coverage.html
-make lint               # golangci-lint (gosec, gocritic, revive, ...)
-make ci                 # the exact CI pipeline, locally
+make test               # unit + integration (mocks — no infra)
+make test-race
+make test-cover
+make lint
+make ci                 # local CI-equivalent checks
 ```
-
-Testing philosophy: unit tests are black-box with in-memory repositories; integration tests boot the real Fiber app wired like production. Event publishing, pagination, RBAC, and the DLQ processor are all covered.
 
 ---
 
 ## Load testing
 
 ```bash
-make docker-up       # core stack must be running first
-make load-smoke      # 1 VU, sanity check the happy path
-make load-test       # ramping 5→15 VUs — finds THIS box's realistic ceiling
+make docker-up
+make load-smoke
+make load-test
 ```
 
-Runs via the `grafana/k6` Docker image (no local install). Thresholds are deliberately loose for weak hardware, and 429s under load are **expected** — that's the Redis rate limiter doing its job, not a bug. See [`load/load-test.js`](load/load-test.js).
+---
+
+## CI/CD (GitLab)
+
+See [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md) and [`.gitlab-ci.yml`](.gitlab-ci.yml).
+
+| Stage | Purpose |
+| ----- | ------- |
+| lint / test / build | Every branch & MR |
+| docker | Image build + Trivy |
+| release | Push to GitLab Container Registry (`main` / tags) |
+| deploy | **Manual** job — pull images on the server and rollout (Mode B) |
 
 ---
 
-## CI/CD
+## Kubernetes (k3s)
 
-| Workflow                                       | Trigger        | What it does                                                                                                             |
-| ---------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| [`ci.yml`](.github/workflows/ci.yml)           | push/PR        | vet → golangci-lint → tests → race → coverage (Codecov) → build → Docker build → **Trivy scan** (fails on HIGH/CRITICAL) |
-| [`codeql.yml`](.github/workflows/codeql.yml)   | push/PR/weekly | GitHub CodeQL security-and-quality analysis                                                                              |
-| [`release.yml`](.github/workflows/release.yml) | main/tags      | Multi-arch-ready image build → push **GHCR** (`api`, `worker`) with semver/sha tags → GitHub Release with auto notes     |
-| [`dependabot.yml`](.github/dependabot.yml)     | weekly         | Go modules, GitHub Actions, Docker base images                                                                           |
+The cluster runs only the **stateless app tier** (`api` + `worker`). Data services stay on Docker Compose on the same host.
 
----
-
-## Kubernetes & Helm
-
-**Runs on [k3s](https://k3s.io), not full kubeadm** — a real kubeadm control plane (etcd + apiserver + controller-manager + scheduler) easily costs 1.5-2GB RAM before a single workload runs, and etcd's fsync latency punishes SATA SSDs. k3s replaces etcd with SQLite and ships Traefik + a lightweight metrics-server out of the box, for a fraction of the footprint.
-
-**The cluster only runs the stateless app tier** (`api` + `worker`) — that's where Kubernetes earns its keep (rolling updates, self-healing, HPA). Postgres/Redis/Kafka/MongoDB/Typesense stay on Docker Compose on the same box; running single-instance stateful services in k8s buys nothing on one node and costs more overhead than Compose.
-
-Raw manifests in [`k8s/`](k8s/): namespace, configmap (point `HOST_IP` at the box's LAN IP), secret template, api/worker deployments (non-root, resource limits, liveness/readiness probes, preStop drain), ClusterIP service, Traefik **Ingress**, and an **HPA** (2→4 pods on CPU 70% — capped to match 4 physical cores).
+Public / domain access later: [`docs/PUBLIC-ACCESS.md`](docs/PUBLIC-ACCESS.md).
 
 ```bash
 kubectl apply -f k8s/
 # or
 helm install golang-be ./helm/golang-be -n golang-be --create-namespace \
-  --set config.hostIP=192.168.1.50
+  --set config.hostIP=192.168.0.155
 ```
-
-Worker replicas double as a **Kafka consumer group** — scaling the deployment scales partition consumption for free.
 
 ---
 
 ## Design decisions worth reading
 
-- **Migrations over AutoMigrate** — schema changes are reviewed, ordered, reversible SQL files embedded in the binary and applied on boot.
-- **At-least-once + idempotent sink** — offsets commit only after Mongo write; `eventId` unique index makes redeliveries harmless.
-- **Circuit breaker on search** — Typesense can die without taking the API down (503 on `/search`, CRUD unaffected).
-- **Fail-open rate limiter** — a Redis hiccup never blocks traffic; limits resume when Redis recovers.
-- **Detached async side effects** — event publishing/indexing run in timeout-bounded goroutines; request latency never includes broker round-trips.
-- **Config validation at boot** — a misconfigured process panics at startup with every invalid field listed, never at 3 AM in production.
+- **Migrations over AutoMigrate** — reviewed, ordered, reversible SQL
+- **At-least-once + idempotent sink** — commit after Mongo write; unique `eventId`
+- **Circuit breaker on search** — Typesense outage does not kill CRUD
+- **Fail-open rate limiter** — Redis blip never blocks all traffic
+- **Async side effects** — Kafka/Typesense do not inflate HTTP latency
+- **Config validation at boot** — misconfig fails fast, including production secret guards
