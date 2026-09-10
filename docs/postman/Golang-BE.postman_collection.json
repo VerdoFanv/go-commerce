@@ -39,15 +39,15 @@
     },
     {
       "key": "buyerEmail",
-      "value": "buyer@example.com"
+      "value": "buyer@golang-be.dev"
     },
     {
       "key": "buyerPassword",
-      "value": "buyer123"
+      "value": "user123"
     },
     {
       "key": "adminEmail",
-      "value": "admin@example.com"
+      "value": "admin@golang-be.dev"
     },
     {
       "key": "adminPassword",

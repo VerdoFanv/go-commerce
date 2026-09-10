@@ -9,10 +9,10 @@ set -euo pipefail
 
 HOST="${HOST:-http://127.0.0.1:8080}"
 API_KEY="${API_KEY:-dev-api-key}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@golang-be.dev}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
-BUYER_EMAIL="${BUYER_EMAIL:-buyer@example.com}"
-BUYER_PASSWORD="${BUYER_PASSWORD:-buyer123}"
+BUYER_EMAIL="${BUYER_EMAIL:-buyer@golang-be.dev}"
+BUYER_PASSWORD="${BUYER_PASSWORD:-user123}"
 PRODUCT_ID="${PRODUCT_ID:-}"
 
 HDR=(-H "apikey: ${API_KEY}" -H "Content-Type: application/json")
@@ -28,9 +28,11 @@ json_field() {
 
 login() {
   local email="$1" passwd="$2"
-  curl -s -X POST "$HOST/api/v1/authentication/login" "${HDR[@]}" \
-    -d "{\"email\":\"$email\",\"password\":\"$passwd\"}" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['tokens']['accessToken'])"
+  local raw
+  raw=$(curl -s -X POST "$HOST/api/v1/authentication/login" "${HDR[@]}" \
+    -d "{\"email\":\"$email\",\"password\":\"$passwd\"}")
+  echo "$raw" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['tokens']['accessToken'])" 2>/dev/null \
+    || { echo "login failed for $email: $raw" >&2; return 1; }
 }
 
 echo "==> ready"
