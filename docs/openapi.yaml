@@ -184,11 +184,21 @@ paths:
                   type: string
       responses:
         "200":
-          description: OK
+          description: OK — `data` is AuthTokens directly (not nested under `tokens`)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthEnvelope"
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string, example: token refreshed }
+                  data: { $ref: "#/components/schemas/AuthTokens" }
+              example:
+                success: true
+                message: token refreshed
+                data:
+                  accessToken: eyJ...
+                  refreshToken: eyJ...
         "401":
           description: Token invalid/expired — errorCode `AUTH_TOKEN_EXPIRED` when expired
           $ref: "#/components/responses/Error"
@@ -860,7 +870,7 @@ components:
       properties:
         name: { type: string, example: Andi }
         email: { type: string, format: email, example: andi@example.com }
-        password: { type: string, minLength: 6, example: secret1 }
+        password: { type: string, minLength: 8, example: secret123 }
 
     LoginRequest:
       type: object
@@ -889,14 +899,28 @@ components:
 
     AuthEnvelope:
       type: object
+      description: Login / register success body (`data.tokens.*`)
       properties:
         success: { type: boolean }
         message: { type: string }
         data:
           type: object
+          required: [user, tokens]
           properties:
             user: { $ref: "#/components/schemas/User" }
             tokens: { $ref: "#/components/schemas/AuthTokens" }
+      example:
+        success: true
+        message: login success
+        data:
+          user:
+            id: 1
+            name: Buyer Demo
+            email: buyer@golang-be.dev
+            role: user
+          tokens:
+            accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
     UserEnvelope:
       type: object

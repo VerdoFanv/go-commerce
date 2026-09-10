@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Golang BE",
-    "description": "Full API surface for golang-be (auth, products, wishlist, orders, lab chaos).\n\nImport env: Golang-BE.lab / Golang-BE.local.\nDocs: docs/openapi.yaml + docs/FAILURE-RUNBOOK.md",
+    "description": "Full API surface for golang-be (auth, products, wishlist, orders, lab chaos).\n\nImport env: Golang-BE.lab / Golang-BE.local.\nDocs: docs/openapi.yaml + docs/FAILURE-RUNBOOK.md\n\n**Tokens:** Login scripts write `accessToken` / `refreshToken` / `adminToken` to the **active Environment** (and collection). Select Lab or Local env first \u2014 empty env values previously shadowed collection vars.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -191,7 +191,30 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Postman User\",\n  \"email\": \"postman-{{$timestamp}}@bench.local\",\n  \"password\": \"secret123\"\n}"
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
+                  "pm.test('register 201', function () { pm.response.to.have.status(201); });",
+                  "if (pm.response.code === 201) {",
+                  "  const d = pm.response.json().data || {};",
+                  "  const tokens = d.tokens || {};",
+                  "  setVar('accessToken', tokens.accessToken);",
+                  "  setVar('refreshToken', tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Login (buyer/seller)",
@@ -232,10 +255,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
+                  "pm.test('login 200', function () { pm.response.to.have.status(200); });",
                   "if (pm.response.code === 200) {",
-                  "  const d = pm.response.json().data;",
-                  "  pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
-                  "  pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "  const body = pm.response.json();",
+                  "  const d = body.data || {};",
+                  "  const tokens = d.tokens || d; // login: data.tokens; refresh: data is tokens",
+                  "  if (!tokens || !tokens.accessToken) {",
+                  "    console.warn('login OK but no accessToken in', JSON.stringify(body));",
+                  "    return;",
+                  "  }",
+                  "  setVar('accessToken', tokens.accessToken);",
+                  "  setVar('refreshToken', tokens.refreshToken);",
+                  "  console.log('saved accessToken/refreshToken to environment + collection');",
                   "}"
                 ]
               }
@@ -281,9 +318,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
+                  "pm.test('admin login 200', function () { pm.response.to.have.status(200); });",
                   "if (pm.response.code === 200) {",
-                  "  const d = pm.response.json().data;",
-                  "  pm.collectionVariables.set('adminToken', d.tokens.accessToken);",
+                  "  const body = pm.response.json();",
+                  "  const d = body.data || {};",
+                  "  const tokens = d.tokens || d;",
+                  "  if (!tokens || !tokens.accessToken) {",
+                  "    console.warn('admin login OK but no accessToken');",
+                  "    return;",
+                  "  }",
+                  "  setVar('adminToken', tokens.accessToken);",
+                  "  // Keep buyer tokens untouched; admin uses adminToken.",
+                  "  console.log('saved adminToken to environment + collection');",
                   "}"
                 ]
               }
@@ -353,7 +405,31 @@
               "mode": "raw",
               "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
+                  "pm.test('refresh 200', function () { pm.response.to.have.status(200); });",
+                  "if (pm.response.code === 200) {",
+                  "  const d = pm.response.json().data || {};",
+                  "  // Refresh returns AuthTokens directly under data (not data.tokens).",
+                  "  const tokens = d.accessToken ? d : (d.tokens || {});",
+                  "  setVar('accessToken', tokens.accessToken);",
+                  "  setVar('refreshToken', tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Logout",
@@ -438,8 +514,14 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
                   "if (pm.response.code === 201) {",
-                  "  pm.collectionVariables.set('productId', String(pm.response.json().data.id));",
+                  "  setVar('productId', pm.response.json().data.id);",
                   "}"
                 ]
               }
@@ -679,9 +761,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
                   "if (pm.response.code === 201 || pm.response.code === 200) {",
                   "  const d = pm.response.json().data;",
-                  "  if (d && d.id) pm.collectionVariables.set('wishlistId', String(d.id));",
+                  "  if (d && d.id) setVar('wishlistId', d.id);",
                   "}"
                 ]
               }
@@ -834,8 +922,14 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
                   "if (pm.response.code === 201) {",
-                  "  pm.collectionVariables.set('orderId', String(pm.response.json().data.id));",
+                  "  setVar('orderId', pm.response.json().data.id);",
                   "}"
                 ]
               }
