@@ -86,21 +86,30 @@ test-cover: ## Run tests and export coverage.html
 	go test -coverprofile=coverage.out ./test/unit/... ./test/integration/...
 	go tool cover -html=coverage.out -o coverage.html
 
-## ---- Load testing (k6 via Docker — no local install needed) ----
+## ---- Load / benchmark (k6 via Docker) ----
 
 K6_IMAGE := grafana/k6:0.54.0
 K6_NET   := golang-be_default
 
-.PHONY: load-smoke load-test
-load-smoke: ## Sanity check the happy path (1 VU, 5 iterations)
-	docker run --rm -i --network $(K6_NET) -v $(PWD)/load:/scripts \
-		-e BASE_URL=http://api:8080 -e API_KEY=dev-api-key \
-		$(K6_IMAGE) run /scripts/smoke.js
+.PHONY: load-smoke load-test bench bench-smoke bench-oversell bench-checkout
+load-smoke: bench-smoke ## Alias — commerce smoke (order path)
 
-load-test: ## Ramping load test — finds this box's realistic ceiling
+load-test: ## Legacy product CRUD ramp (prefer make bench)
 	docker run --rm -i --network $(K6_NET) -v $(PWD)/load:/scripts \
-		-e BASE_URL=http://api:8080 -e API_KEY=dev-api-key \
+		-e BASE_URL=http://api:8080 -e API_KEY=$${API_KEY:-dev-api-key} \
 		$(K6_IMAGE) run /scripts/load-test.js
+
+bench: ## Full commerce benchmark matrix → load/results/ (see docs/BENCHMARK.md)
+	BASE_URL=$${BASE_URL:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} ./scripts/bench.sh
+
+bench-smoke: ## Gate: health + register + product + order
+	BASE_URL=$${BASE_URL:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} BENCH_ONLY=smoke ./scripts/bench.sh
+
+bench-oversell: ## Contention: N≫S buyers, assert no negative stock
+	BASE_URL=$${BASE_URL:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} BENCH_ONLY=oversell ./scripts/bench.sh
+
+bench-checkout: ## Sustained POST /orders (raise RATE_LIMIT_MAX first)
+	BASE_URL=$${BASE_URL:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} BENCH_ONLY=checkout ./scripts/bench.sh
 
 ## ---- Quality ----
 

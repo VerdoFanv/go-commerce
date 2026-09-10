@@ -17,7 +17,7 @@ It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credibl
 
 Beyond infra, it also labs **commerce reliability** problems found in large systems: order state machine, inventory hold, payment choreography, transactional outbox, consumer inbox, stock ledger, and a live failure matrix.
 
-**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
+**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Benchmark / capacity](docs/BENCHMARK.md) · [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
@@ -356,14 +356,26 @@ make ci                 # local CI-equivalent checks
 
 ## Load testing
 
-```bash
-make docker-up
-make load-smoke
-make load-test
+Capacity evidence lives in [`docs/BENCHMARK.md`](docs/BENCHMARK.md) — not in feature bullets.
 
-# Commerce concurrency (oversell must not go negative)
-API=http://127.0.0.1:8080 API_KEY=... TOKEN=... PRODUCT_ID=1 N=20 ./scripts/load-orders.sh
+```bash
+# API must be up. Lab example:
+BASE_URL=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make bench
+
+make bench-smoke      # health + order path
+make bench-oversell   # N≫S race, stock never < 0
+make bench-checkout   # sustained POST /orders (raise RATE_LIMIT_MAX first)
+
+# Legacy bash oversell with hard assert:
+API=... API_KEY=... TOKEN=... SELLER_TOKEN=... PRODUCT_ID=1 N=40 ./scripts/load-orders.sh
 ```
+
+| Layer | Proves |
+| ----- | ------ |
+| `test/unit` + `test/integration` | Logic & HTTP wiring (mocks / in-memory) |
+| `load/*` + `scripts/bench.sh` | Live SLIs: oversell, checkout latency, rate limit, mixed traffic |
+
+Results → `load/results/` (gitignored). Paste a row into the table in `docs/BENCHMARK.md` after each honest run.
 
 ---
 

@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 # Parallel order creates against one SKU — stock must never go negative.
+# Asserts created <= initial_stock via GET /products/:id (seller token).
+#
 # Usage:
-#   API=http://192.168.0.155 API_KEY=... TOKEN=... PRODUCT_ID=1 ./scripts/load-orders.sh
+#   API=http://192.168.0.155 API_KEY=... TOKEN=... SELLER_TOKEN=... PRODUCT_ID=1 N=40 ./scripts/load-orders.sh
 set -euo pipefail
 
 API="${API:-http://127.0.0.1:8080}"
 API_KEY="${API_KEY:?set API_KEY}"
 TOKEN="${TOKEN:?set TOKEN (buyer access token)}"
+SELLER_TOKEN="${SELLER_TOKEN:-$TOKEN}"
 PRODUCT_ID="${PRODUCT_ID:?set PRODUCT_ID}"
-N="${N:-20}"
+N="${N:-40}"
 QTY="${QTY:-1}"
+
+stock_before=$(curl -s "$API/api/v1/products/$PRODUCT_ID" \
+  -H "apikey: $API_KEY" -H "Authorization: Bearer $SELLER_TOKEN" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stock'])")
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
-echo "Firing $N parallel POST /orders (product=$PRODUCT_ID qty=$QTY)..."
+echo "stock_before=$stock_before — firing $N parallel POST /orders (product=$PRODUCT_ID qty=$QTY)..."
 
 for i in $(seq 1 "$N"); do
   (
@@ -42,5 +49,22 @@ for i in $(seq 1 "$N"); do
   esac
 done
 
-echo "created=$ok conflict=$conflict other=$other"
-echo "Check stock: SELECT id,name,stock FROM products WHERE id=$PRODUCT_ID;  (must be >= 0)"
+stock_after=$(curl -s "$API/api/v1/products/$PRODUCT_ID" \
+  -H "apikey: $API_KEY" -H "Authorization: Bearer $SELLER_TOKEN" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stock'])")
+
+echo "created=$ok conflict=$conflict other=$other stock_before=$stock_before stock_after=$stock_after"
+
+if [[ "$stock_after" -lt 0 ]]; then
+  echo "FAIL: oversell — stock_after < 0" >&2
+  exit 1
+fi
+if [[ "$ok" -gt "$stock_before" ]]; then
+  echo "FAIL: created ($ok) > stock_before ($stock_before)" >&2
+  exit 1
+fi
+if [[ "$other" -ne 0 ]]; then
+  echo "FAIL: unexpected statuses=$other" >&2
+  exit 1
+fi
+echo "PASS: no oversell; created<=stock_before; stock_after>=0"

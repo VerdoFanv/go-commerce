@@ -1,59 +1,74 @@
-// Smoke test: 1 VU, few iterations — proves the happy path works end to end
-// before running the heavier load test. Run this first, always.
+// Smoke: health + auth + product + ONE real checkout (the commerce hot path).
+// Fail hard on any unexpected status — this is the gate before heavier benches.
 import { check, sleep } from "k6";
 import http from "k6/http";
-
-const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
-const API_KEY = __ENV.API_KEY || "dev-api-key";
+import {
+  BASE_URL,
+  createOrder,
+  createProduct,
+  getProduct,
+  headers,
+  register,
+} from "./helpers.js";
 
 export const options = {
   vus: 1,
-  iterations: 5,
+  iterations: 3,
   thresholds: {
     http_req_failed: ["rate==0"],
+    checks: ["rate>0.99"],
   },
 };
 
-function headers(token) {
-  const h = { "Content-Type": "application/json", apikey: API_KEY };
-  if (token) h["Authorization"] = `Bearer ${token}`;
-  return h;
-}
-
 export default function () {
-  const email = `k6-smoke-${__VU}-${__ITER}-${Date.now()}@example.com`;
-
-  const register = http.post(
-    `${BASE_URL}/api/v1/authentication/register`,
-    JSON.stringify({ name: "K6 Smoke", email, password: "secret123" }),
-    { headers: headers() }
-  );
-  check(register, { "register: 201": (r) => r.status === 201 });
-
-  const token = register.json("data.tokens.accessToken");
-  check(token, { "register: got access token": (t) => !!t });
-
-  const create = http.post(
-    `${BASE_URL}/api/v1/products`,
-    JSON.stringify({ name: "Smoke Product", price: 1000, stock: 1 }),
-    { headers: headers(token) }
-  );
-  check(create, { "create product: 201": (r) => r.status === 201 });
-
-  const id = create.json("data.id");
-
-  const get = http.get(`${BASE_URL}/api/v1/products/${id}`, {
-    headers: headers(token),
-  });
-  check(get, { "get product: 200": (r) => r.status === 200 });
-
-  const list = http.get(`${BASE_URL}/api/v1/products?limit=10`, {
-    headers: headers(token),
-  });
-  check(list, { "list products: 200": (r) => r.status === 200 });
-
   const health = http.get(`${BASE_URL}/health/ready`);
-  check(health, { "health ready: 200": (r) => r.status === 200 });
+  check(health, { "ready: 200": (r) => r.status === 200 });
 
-  sleep(1);
+  const seller = register("bench-seller");
+  check(seller, { "seller registered": (s) => s.ok });
+  if (!seller.ok) return;
+
+  const product = createProduct(seller.token, {
+    name: `Smoke SKU ${Date.now()}`,
+    price: 15000,
+    stock: 5,
+  });
+  check(product, { "create product: 201": (r) => r.status === 201 });
+  const productId = product.json("data.id");
+
+  const buyer = register("bench-buyer");
+  check(buyer, { "buyer registered": (s) => s.ok });
+  if (!buyer.ok) return;
+
+  const order = createOrder(
+    buyer.token,
+    productId,
+    1,
+    `smoke-${__ITER}-${Date.now()}`
+  );
+  check(order, { "create order: 201": (r) => r.status === 201 });
+  const orderId = order.json("data.id");
+
+  const got = http.get(`${BASE_URL}/api/v1/orders/${orderId}`, {
+    headers: headers(buyer.token),
+  });
+  check(got, {
+    "get order: 200": (r) => r.status === 200,
+    "order pending_payment or paid": (r) => {
+      const st = r.json("data.status");
+      return st === "pending_payment" || st === "paid";
+    },
+  });
+
+  const stockAfter = getProduct(seller.token, productId);
+  check(stockAfter, {
+    "stock still >= 0": (r) => r.status === 200 && r.json("data.stock") >= 0,
+  });
+
+  const catalog = http.get(`${BASE_URL}/api/v1/products/catalog?limit=10`, {
+    headers: headers(buyer.token),
+  });
+  check(catalog, { "catalog: 200": (r) => r.status === 200 });
+
+  sleep(0.2);
 }
