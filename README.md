@@ -36,22 +36,22 @@ Beyond infra, it also labs **commerce reliability** problems found in large syst
 
 ## Positive impact of this stack
 
-| Choice | What you gain |
-| ------ | ------------- |
-| **PostgreSQL as source of truth** | Strong consistency for users/products/**orders**; clear ownership of business data |
-| **Transactional outbox** | Order writes stay correct when Kafka is down — events publish later, not lost |
-| **Consumer inbox + stock ledger** | Duplicate Kafka deliveries do not double-charge or corrupt inventory; stock moves are auditable |
-| **Redis** | Lower latency on hot reads; built-in sliding-window rate limiting across replicas |
-| **Kafka + worker** | Decoupled side effects, durable event log, consumer groups, DLQ for poison messages |
-| **MongoDB audit** | Immutable event history for debugging, compliance demos, and “what happened” timelines |
-| **Typesense** | Production-style full-text search without overloading Postgres `LIKE` scans |
-| **Gin + clean architecture** | Industry-standard Go HTTP stack; handlers stay thin; services are unit-testable |
-| **SQL migrations (golang-migrate)** | Reviewable, ordered, reversible schema changes — same process local → server |
-| **k3s (app tier)** | Self-healing pods, rolling updates, HPA, readiness-based traffic — real deploy muscle |
-| **GitLab CI + Container Registry** | Repeatable lint/test/build/scan/push; optional automated release |
-| **Observability plane** | You can *show* RED metrics, traces, outbox lag, and logs — not only claim them |
+| Choice                              | What you gain                                                                                   |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **PostgreSQL as source of truth**   | Strong consistency for users/products/**orders**; clear ownership of business data              |
+| **Transactional outbox**            | Order writes stay correct when Kafka is down — events publish later, not lost                   |
+| **Consumer inbox + stock ledger**   | Duplicate Kafka deliveries do not double-charge or corrupt inventory; stock moves are auditable |
+| **Redis**                           | Lower latency on hot reads; built-in sliding-window rate limiting across replicas               |
+| **Kafka + worker**                  | Decoupled side effects, durable event log, consumer groups, DLQ for poison messages             |
+| **MongoDB audit**                   | Immutable event history for debugging, compliance demos, and “what happened” timelines          |
+| **Typesense**                       | Production-style full-text search without overloading Postgres `LIKE` scans                     |
+| **Gin + clean architecture**        | Industry-standard Go HTTP stack; handlers stay thin; services are unit-testable                 |
+| **SQL migrations (golang-migrate)** | Reviewable, ordered, reversible schema changes — same process local → server                    |
+| **k3s (app tier)**                  | Self-healing pods, rolling updates, HPA, readiness-based traffic — real deploy muscle           |
+| **GitLab CI + Container Registry**  | Repeatable lint/test/build/scan/push; optional automated release                                |
+| **Observability plane**             | You can _show_ RED metrics, traces, outbox lag, and logs — not only claim them                  |
 
-**Interview angle:** you can explain *why* each store exists, how an order survives broker outages, and how traffic flows — the positive signal this portfolio is built for.
+**Interview angle:** you can explain _why_ each store exists, how an order survives broker outages, and how traffic flows — the positive signal this portfolio is built for.
 
 ---
 
@@ -69,12 +69,12 @@ Other solid tools (not used here): Atlas, Flyway, Liquibase. AutoMigrate is fine
 
 ## Secrets & config
 
-| Source | Contents | Commit? |
-| ------ | -------- | ------- |
-| `.env` (from `.env.example`) | Local development | No (gitignored) |
-| `k8s/secret.yaml` (from `secret.example.yaml`) | Runtime secrets on k3s | No (gitignored) |
-| `k8s/configmap.yaml` | Non-secret config (hosts, ports, topic names) | Yes |
-| Go defaults in `config.Load` | Local boot fallbacks only | Yes — never real production passwords |
+| Source                                         | Contents                                      | Commit?                               |
+| ---------------------------------------------- | --------------------------------------------- | ------------------------------------- |
+| `.env` (from `.env.example`)                   | Local development                             | No (gitignored)                       |
+| `k8s/secret.yaml` (from `secret.example.yaml`) | Runtime secrets on k3s                        | No (gitignored)                       |
+| `k8s/configmap.yaml`                           | Non-secret config (hosts, ports, topic names) | Yes                                   |
+| Go defaults in `config.Load`                   | Local boot fallbacks only                     | Yes — never real production passwords |
 
 Put real credentials in `.env` / `k8s/secret.yaml` / your password manager — not in git.
 
@@ -109,9 +109,9 @@ flowchart LR
 
 **Two publish paths (important for interviews):**
 
-| Path | How events leave the API | When Kafka is down |
-| ---- | ------------------------ | ------------------ |
-| **Product CRUD** | Fire-and-forget `publishAsync` after DB commit | Event may be lost (demo of the dual-write problem) |
+| Path                  | How events leave the API                                                              | When Kafka is down                                                            |
+| --------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Product CRUD**      | Fire-and-forget `publishAsync` after DB commit                                        | Event may be lost (demo of the dual-write problem)                            |
 | **Orders (commerce)** | Same Postgres TX writes order + `outbox_events`; API **outbox relay** publishes later | `POST /orders` still **201** — pending rows visible via `/lab/outbox/pending` |
 
 **Request path** (`POST /api/v1/products`):
@@ -126,30 +126,30 @@ Deep dive (ID): [`docs/belajar/09-commerce-reliability.md`](docs/belajar/09-comm
 
 ## Tech stack
 
-| Concern | Choice |
-| ------- | ------ |
-| Language | Go **1.25** |
-| HTTP | **Gin** |
-| DI | Uber **fx** |
-| RDBMS | PostgreSQL + GORM + **golang-migrate** (SQL files) |
-| Cache / rate limit | Redis + `redis_rate` |
-| Events | Kafka (KRaft) + `segmentio/kafka-go` + **transactional outbox** |
-| Reliability | Consumer **inbox**, stock **ledger**, DLQ, Typesense circuit breaker |
-| Audit | MongoDB |
-| Search | Typesense + circuit breaker |
-| Real-time | WebSocket (`gorilla/websocket`) |
-| Commerce | Orders / inventory reservations / payment simulator / fulfill |
-| CI/CD | **GitLab CI** → Container Registry + Trivy (optional auto-deploy) |
-| Deploy | Docker Compose (data plane) + **k3s** / Helm (app tier) |
+| Concern            | Choice                                                               |
+| ------------------ | -------------------------------------------------------------------- |
+| Language           | Go **1.25**                                                          |
+| HTTP               | **Gin**                                                              |
+| DI                 | Uber **fx**                                                          |
+| RDBMS              | PostgreSQL + GORM + **golang-migrate** (SQL files)                   |
+| Cache / rate limit | Redis + `redis_rate`                                                 |
+| Events             | Kafka (KRaft) + `segmentio/kafka-go` + **transactional outbox**      |
+| Reliability        | Consumer **inbox**, stock **ledger**, DLQ, Typesense circuit breaker |
+| Audit              | MongoDB                                                              |
+| Search             | Typesense + circuit breaker                                          |
+| Real-time          | WebSocket (`gorilla/websocket`)                                      |
+| Commerce           | Orders / inventory reservations / payment simulator / fulfill        |
+| CI/CD              | **GitLab CI** → Container Registry + Trivy (optional auto-deploy)    |
+| Deploy             | Docker Compose (data plane) + **k3s** / Helm (app tier)              |
 
 ---
 
 ## Two delivery modes
 
-| Mode | When to use | How |
-| ---- | ----------- | --- |
-| **A — Self-deploy (lab)** | Day-to-day on one Ubuntu box | Compose = Kafka/Typesense; **k3s** = api + worker |
-| **B — GitLab CI/CD** | Clean releases / portfolio pipeline | Push → build/scan → registry → optional manual deploy |
+| Mode                      | When to use                         | How                                                   |
+| ------------------------- | ----------------------------------- | ----------------------------------------------------- |
+| **A — Self-deploy (lab)** | Day-to-day on one Ubuntu box        | Compose = Kafka/Typesense; **k3s** = api + worker     |
+| **B — GitLab CI/CD**      | Clean releases / portfolio pipeline | Push → build/scan → registry → optional manual deploy |
 
 Both are first-class. Ops detail (ID): [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md) · GitLab: [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md).
 
@@ -158,8 +158,6 @@ Both are first-class. Ops detail (ID): [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-
 ---
 
 ## Lab deploy (Mode A) — commands
-
-Run on the **server** (`~/projects/golang-be`). Default LAN IP below: `192.168.0.155` — ganti kalau beda.
 
 ### One-time / first boot
 
@@ -195,37 +193,6 @@ HOST_IP=192.168.0.155 ./scripts/deploy-k3s-lab.sh
 
 Script itu menjalankan: Kafka+Typesense → build `golang-be-api:local` / `golang-be-worker:local` → `k3s ctr images import` → apply ConfigMap/Secret/manifests → rollout.
 
-Tanpa script (setara):
-
-```bash
-cd ~/projects/golang-be
-git pull
-
-# data plane only (bukan api/worker)
-KAFKA_HOST_ADVERTISE=192.168.0.155 docker compose up -d kafka typesense
-
-docker build --target api    -t golang-be-api:local .
-docker build --target worker -t golang-be-worker:local .
-docker save golang-be-api:local    -o /tmp/golang-be-api.tar
-docker save golang-be-worker:local -o /tmp/golang-be-worker.tar
-sudo k3s ctr images import /tmp/golang-be-api.tar
-sudo k3s ctr images import /tmp/golang-be-worker.tar
-
-sed "s/HOST_IP/$(hostname -I | awk '{print $1}')/g" k8s/configmap.yaml \
-  | sudo k3s kubectl apply -f -
-sudo k3s kubectl apply -f k8s/namespace.yaml -f k8s/secret.yaml \
-  -f k8s/api-deployment.yaml -f k8s/api-service.yaml \
-  -f k8s/api-hpa.yaml -f k8s/api-ingress.yaml \
-  -f k8s/worker-deployment.yaml
-
-sudo k3s kubectl -n golang-be rollout restart deploy/api deploy/worker
-sudo k3s kubectl -n golang-be rollout status deploy/api
-sudo k3s kubectl -n golang-be get pods,svc,ingress
-curl -s http://192.168.0.155/health/ready
-```
-
-API lewat Traefik ingress: `http://192.168.0.155/` (header `apikey` dari `k8s/secret.yaml`).
-
 ### Restart app saja (tanpa rebuild)
 
 ```bash
@@ -239,33 +206,11 @@ Zero-downtime: API `replicas: 2`, `maxUnavailable: 0`, readiness `/health/ready`
 
 ## Teardown (down semua)
 
-### App k3s saja
-
-```bash
-sudo k3s kubectl delete namespace golang-be
-# atau selective:
-# sudo k3s kubectl -n golang-be delete deploy,svc,ingress,hpa,cm,secret --all
-```
-
-### Data plane golang-be (Kafka / Typesense)
-
-```bash
-cd ~/projects/golang-be
-docker compose down          # stop + hapus container
-# docker compose down -v   # + hapus volume (data Kafka/Typesense ikut hilang)
-```
-
 ### Full lab wipe (app + data plane golang-be)
 
 ```bash
 sudo k3s kubectl delete namespace golang-be
-cd ~/projects/golang-be && docker compose down -v
-```
-
-Postgres/Redis/Mongo di `~/projects/infra-db` **tidak** ikut mati (dipakai project lain). Matikan terpisah hanya kalau memang mau:
-
-```bash
-cd ~/projects/infra-db && docker compose down
+docker compose down -v
 ```
 
 ### Cek bersih
@@ -304,24 +249,24 @@ make obs-down
 
 ### 3. Explore
 
-| Service | URL | Credentials |
-| ------- | --- | ----------- |
-| API | http://localhost:8080 | header `apikey: dev-api-key` |
-| Swagger UI | http://localhost:8080/docs | — |
-| Grafana | http://localhost:3000 | `admin` / `admin` |
-| Prometheus | http://localhost:9090 | — |
-| Jaeger | http://localhost:16686 | set `OTEL_ENABLED=true` |
-| Metrics | http://localhost:8080/metrics | — |
+| Service    | URL                           | Credentials                  |
+| ---------- | ----------------------------- | ---------------------------- |
+| API        | http://localhost:8080         | header `apikey: dev-api-key` |
+| Swagger UI | http://localhost:8080/docs    | —                            |
+| Grafana    | http://localhost:3000         | `admin` / `admin`            |
+| Prometheus | http://localhost:9090         | —                            |
+| Jaeger     | http://localhost:16686        | set `OTEL_ENABLED=true`      |
+| Metrics    | http://localhost:8080/metrics | —                            |
 
 Prefer host processes? `make infra-up`, then `make api` + `make worker`.
 
 ### Demo accounts (migrations)
 
-| Email | Password | Notes |
-| ----- | -------- | ----- |
-| `admin@golang-be.dev` | `admin123` | RBAC — can delete any product |
-| `seller@golang-be.dev` | `seller123` | Owns demo catalog |
-| `buyer@golang-be.dev` | `user123` | Use for wishlist + **orders** |
+| Email                  | Password    | Notes                         |
+| ---------------------- | ----------- | ----------------------------- |
+| `admin@golang-be.dev`  | `admin123`  | RBAC — can delete any product |
+| `seller@golang-be.dev` | `seller123` | Owns demo catalog             |
+| `buyer@golang-be.dev`  | `user123`   | Use for wishlist + **orders** |
 
 ---
 
@@ -333,29 +278,29 @@ All `/api/v1` routes require `apikey`; protected routes also need `Authorization
 { "success": false, "message": "not found", "errorCode": "RESOURCE_NOT_FOUND" }
 ```
 
-| Method | Path | Auth | Notes |
-| ------ | ---- | ---- | ----- |
-| `GET` | `/health/live` | — | Liveness |
-| `GET` | `/health/ready` | — | Readiness (PG/Redis/Mongo/Typesense) |
-| `GET` | `/metrics` | — | Prometheus (includes `golangbe_outbox_pending`) |
-| `POST` | `/api/v1/authentication/register` | apikey | Create account (password min 8) |
-| `POST` | `/api/v1/authentication/login` | apikey | Issue tokens |
-| `POST` | `/api/v1/authentication/refresh-token` | apikey | Rotate refresh (jti in Redis) |
-| `POST` | `/api/v1/authentication/logout` | apikey | Revoke refresh jti |
-| `GET` | `/api/v1/authentication/me` | +bearer | Current user |
-| `GET` | `/api/v1/products` | +bearer | Seller's own catalog (cursor + cache) |
-| `GET` | `/api/v1/products/catalog` | +bearer | Buyer marketplace browse |
-| `GET` | `/api/v1/products/search?q=` | +bearer | Typesense full-text |
-| `POST` | `/api/v1/products` | +bearer | Create → Kafka event (async) |
-| `GET`/`PUT`/`DELETE` | `/api/v1/products/:id` | +bearer | Detail / update / delete |
-| `GET`/`POST`/`DELETE` | `/api/v1/wishlists` | +bearer | Wishlist (+ Redis count) |
-| `POST` | `/api/v1/orders` | +bearer + **Idempotency-Key** | Create order (TX outbox + stock hold) |
-| `GET` | `/api/v1/orders` / `/:id` | +bearer | List / detail |
-| `POST` | `/api/v1/orders/:id/cancel` | +bearer | Cancel + release stock |
-| `POST` | `/api/v1/orders/:id/pay` | +bearer | Lab payment override (`success\|fail\|timeout`) |
-| `POST` | `/api/v1/orders/:id/fulfill` | +bearer **admin** | `paid` → `fulfilled` |
-| `GET` | `/api/v1/lab/*` | +bearer **admin**, non-prod | Infra / outbox chaos |
-| `GET` | `/ws/products?token=&apikey=` | JWT + apikey | Real-time events |
+| Method                | Path                                   | Auth                          | Notes                                           |
+| --------------------- | -------------------------------------- | ----------------------------- | ----------------------------------------------- |
+| `GET`                 | `/health/live`                         | —                             | Liveness                                        |
+| `GET`                 | `/health/ready`                        | —                             | Readiness (PG/Redis/Mongo/Typesense)            |
+| `GET`                 | `/metrics`                             | —                             | Prometheus (includes `golangbe_outbox_pending`) |
+| `POST`                | `/api/v1/authentication/register`      | apikey                        | Create account (password min 8)                 |
+| `POST`                | `/api/v1/authentication/login`         | apikey                        | Issue tokens                                    |
+| `POST`                | `/api/v1/authentication/refresh-token` | apikey                        | Rotate refresh (jti in Redis)                   |
+| `POST`                | `/api/v1/authentication/logout`        | apikey                        | Revoke refresh jti                              |
+| `GET`                 | `/api/v1/authentication/me`            | +bearer                       | Current user                                    |
+| `GET`                 | `/api/v1/products`                     | +bearer                       | Seller's own catalog (cursor + cache)           |
+| `GET`                 | `/api/v1/products/catalog`             | +bearer                       | Buyer marketplace browse                        |
+| `GET`                 | `/api/v1/products/search?q=`           | +bearer                       | Typesense full-text                             |
+| `POST`                | `/api/v1/products`                     | +bearer                       | Create → Kafka event (async)                    |
+| `GET`/`PUT`/`DELETE`  | `/api/v1/products/:id`                 | +bearer                       | Detail / update / delete                        |
+| `GET`/`POST`/`DELETE` | `/api/v1/wishlists`                    | +bearer                       | Wishlist (+ Redis count)                        |
+| `POST`                | `/api/v1/orders`                       | +bearer + **Idempotency-Key** | Create order (TX outbox + stock hold)           |
+| `GET`                 | `/api/v1/orders` / `/:id`              | +bearer                       | List / detail                                   |
+| `POST`                | `/api/v1/orders/:id/cancel`            | +bearer                       | Cancel + release stock                          |
+| `POST`                | `/api/v1/orders/:id/pay`               | +bearer                       | Lab payment override (`success\|fail\|timeout`) |
+| `POST`                | `/api/v1/orders/:id/fulfill`           | +bearer **admin**             | `paid` → `fulfilled`                            |
+| `GET`                 | `/api/v1/lab/*`                        | +bearer **admin**, non-prod   | Infra / outbox chaos                            |
+| `GET`                 | `/ws/products?token=&apikey=`          | JWT + apikey                  | Real-time events                                |
 
 Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
 
@@ -426,12 +371,12 @@ API=http://127.0.0.1:8080 API_KEY=... TOKEN=... PRODUCT_ID=1 N=20 ./scripts/load
 
 See [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md) and [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
-| Stage | Purpose |
-| ----- | ------- |
-| lint / test / build | Every branch & MR |
-| docker | Image build + Trivy |
-| release | Push to GitLab Container Registry (`main` / tags) |
-| deploy | **Manual** job — pull images on the server and rollout (Mode B) |
+| Stage               | Purpose                                                         |
+| ------------------- | --------------------------------------------------------------- |
+| lint / test / build | Every branch & MR                                               |
+| docker              | Image build + Trivy                                             |
+| release             | Push to GitLab Container Registry (`main` / tags)               |
+| deploy              | **Manual** job — pull images on the server and rollout (Mode B) |
 
 ---
 
