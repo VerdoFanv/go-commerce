@@ -105,7 +105,9 @@ Fill a row every time you run on a real box (honest numbers &gt; marketing).
 
 | Date (UTC) | Host / HW | Stack | RATE_LIMIT_MAX | smoke | oversell | mixed | checkout (p95 / approx RPS) | Notes |
 |------------|-----------|-------|----------------|-------|----------|-------|-----------------------------|-------|
-| 2026-09-10T12:39Z | 192.168.0.155 — AMD A8-7410 4c / 6.2Gi RAM | k3s api×2 + worker×1; Kafka+Typesense compose; Postgres/Redis/Mongo via infra-db | 10000 (checkout); 30 (ratelimit) | **pass** | **pass** — S=20, VUs=60 → created=20 conflict=40 other=0 | **pass** — browse p95≈44ms, buy p95≈165ms, fail=0% | p95≈**704ms** (~47.6 orders/s, 7115 creates / 2m, fail=0%) — **misses aspirational 500ms** on this APU; passes lab default 800ms | Outbox climbed under write load then drained (~4.5k→3.3k in 30s sample). First oversell teardown saw stale `stock=20` via Redis product cache (hold didn’t bust cache) — **fixed in follow-up commit** (invalidate on hold/release). |
+| 2026-09-10T12:39Z | 192.168.0.155 — AMD A8-7410 4c / 6.2Gi RAM | k3s api×2 + worker×1; Kafka+Typesense compose; Postgres/Redis/Mongo via infra-db | 10000 (checkout) | **pass** | **pass** — S=20, VUs=60 → created=20 conflict=40 other=0 | **pass** — browse p95≈44ms, buy p95≈165ms, fail=0% | p95≈**704ms** (~47.6 orders/s, 7115 creates / 2m, fail=0%) — **misses aspirational 500ms** on this APU; passes lab default 800ms | Outbox climbed under write load then drained (~4.5k→3.3k in 30s). First oversell teardown saw stale stock via Redis cache — fixed in `6d15799`. |
+| 2026-09-10T12:56Z | same | post cache-fix image | 10000 | — | **pass** — final_stock=**0**, created=20 | — | — | Cache invalidate verified. |
+| 2026-09-10T12:58Z | same | same | **30** / 1m | — | — | — | — | **ratelimit pass** — 14618×429, 0×5xx, ~39 ok. |
 
 Example row format after a run:
 
