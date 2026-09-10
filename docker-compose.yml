@@ -129,6 +129,10 @@ services:
       - "8080:8080"
     env_file:
       - .env
+    environment:
+      # In-compose service DNS (overrides localhost from .env.example).
+      KAFKA_BROKERS: kafka:29092
+      TYPESENSE_ADDR: http://typesense:8108
     depends_on:
       kafka:
         condition: service_healthy
@@ -152,7 +156,6 @@ services:
     environment:
       APP_ENV: development
       KAFKA_BROKERS: kafka:29092
-      MONGO_URI: mongodb://mongodb:27017
     depends_on:
       kafka:
         condition: service_healthy
