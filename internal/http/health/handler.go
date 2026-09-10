@@ -1,6 +1,10 @@
 // Package health implements Kubernetes-style probes: /health/live answers
-// "is the process alive" while /health/ready checks every dependency and
-// answers "should the load balancer send us traffic".
+// "is the process alive" while /health/ready checks dependencies and answers
+// "should the load balancer send us traffic".
+//
+// Critical checkers (Postgres, Redis) failing → 503.
+// Optional checkers (Mongo, Typesense) failing → 200 degraded with detail —
+// so search/audit outages do not drain the whole API from the Service.
 package health
 
 import (
@@ -18,6 +22,8 @@ import (
 type Checker interface {
 	Name() string
 	Ping(ctx context.Context) error
+	// Critical=true → readiness 503 when Ping fails.
+	Critical() bool
 }
 
 type Handler struct {
@@ -41,15 +47,20 @@ func (h *Handler) live(c *gin.Context) {
 	response.OK(c, "alive", gin.H{"status": "up"})
 }
 
-// ready pings every dependency in parallel; any failure → 503 with detail.
+// ready pings every dependency in parallel.
+// Any critical failure → 503. Optional-only failures → 200 "degraded".
 func (h *Handler) ready(c *gin.Context) {
-	results := make(map[string]string, len(h.checkers))
-	var mu sync.Mutex
+	type result struct {
+		name     string
+		status   string
+		critical bool
+	}
+	results := make([]result, len(h.checkers))
 	var wg sync.WaitGroup
 
-	for _, checker := range h.checkers {
+	for i, checker := range h.checkers {
 		wg.Add(1)
-		go func(ch Checker) {
+		go func(idx int, ch Checker) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(c.Request.Context(), h.timeout)
 			defer cancel()
@@ -58,19 +69,40 @@ func (h *Handler) ready(c *gin.Context) {
 			if err := ch.Ping(ctx); err != nil {
 				status = "down: " + err.Error()
 			}
-			mu.Lock()
-			results[ch.Name()] = status
-			mu.Unlock()
-		}(checker)
+			results[idx] = result{name: ch.Name(), status: status, critical: ch.Critical()}
+		}(i, checker)
 	}
 	wg.Wait()
 
-	for _, status := range results {
-		if status != "ok" {
-			response.FailCode(c, http.StatusServiceUnavailable,
-				domain.ErrUnavailable.Error(), domain.ErrorCode(domain.ErrUnavailable))
-			return
+	checks := make(map[string]string, len(results))
+	criticalDown := false
+	optionalDown := false
+	for _, r := range results {
+		checks[r.name] = r.status
+		if r.status != "ok" {
+			if r.critical {
+				criticalDown = true
+			} else {
+				optionalDown = true
+			}
 		}
 	}
-	response.OK(c, "ready", gin.H{"checks": results})
+
+	if criticalDown {
+		c.JSON(http.StatusServiceUnavailable, response.Envelope{
+			Success:   false,
+			Message:   domain.ErrUnavailable.Error(),
+			ErrorCode: domain.ErrorCode(domain.ErrUnavailable),
+			Data:      gin.H{"checks": checks, "mode": "unavailable"},
+		})
+		return
+	}
+
+	payload := gin.H{"checks": checks}
+	if optionalDown {
+		payload["mode"] = "degraded"
+		response.OK(c, "degraded", payload)
+		return
+	}
+	response.OK(c, "ready", payload)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -91,6 +92,7 @@ func registerLifecycle(
 
 			go func() {
 				slog.Info("worker consuming", "topic", cfg.KafkaTopicProducts, "group", cfg.KafkaGroupWorker)
+				backoff := time.Second
 				for {
 					msg, err := consumer.Fetch(workerCtx)
 					if err != nil {
@@ -98,9 +100,18 @@ func registerLifecycle(
 							slog.Info("worker consume loop stopped")
 							return
 						}
-						slog.Error("kafka fetch failed", "err", err)
-						return
+						slog.Error("kafka fetch failed; will retry", "err", err, "backoff", backoff)
+						select {
+						case <-workerCtx.Done():
+							return
+						case <-time.After(backoff):
+						}
+						if backoff < 30*time.Second {
+							backoff *= 2
+						}
+						continue
 					}
+					backoff = time.Second
 
 					if err := processor.Handle(workerCtx, msg); err != nil {
 						slog.Error("event processing failed, offset not committed", "err", err)

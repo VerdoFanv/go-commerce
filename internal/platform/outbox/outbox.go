@@ -64,32 +64,63 @@ type Publisher interface {
 	Publish(ctx context.Context, key string, event kafka.Event) error
 }
 
+const pauseKey = "outbox:relay:paused"
+
+// PauseStore shares lab chaos pause across API replicas (Redis).
+type PauseStore interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key string, value any, ttl time.Duration) error
+}
+
 // Relay polls unpublished rows and publishes them to Kafka.
 type Relay struct {
 	db        *gorm.DB
 	publisher Publisher
 	batchSize int
 	interval  time.Duration
+	store     PauseStore // optional; nil → local-only pause (single replica)
 
-	paused atomic.Bool // lab chaos: pause relay to simulate Kafka-safe requests
+	paused atomic.Bool // local mirror / fallback when Redis unavailable
 	mu     sync.Mutex
 }
 
-func NewRelay(db *gorm.DB, publisher Publisher) *Relay {
+func NewRelay(db *gorm.DB, publisher Publisher, store PauseStore) *Relay {
 	return &Relay{
 		db:        db,
 		publisher: publisher,
+		store:     store,
 		batchSize: 50,
 		interval:  500 * time.Millisecond,
 	}
 }
 
-// SetPaused pauses/resumes automatic relay (lab chaos).
+// SetPaused pauses/resumes automatic relay (lab chaos). When a PauseStore is
+// configured, the flag is cluster-wide so HPA replicas all honor it.
 func (r *Relay) SetPaused(paused bool) {
 	r.paused.Store(paused)
+	if r.store == nil {
+		return
+	}
+	val := "0"
+	if paused {
+		val = "1"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := r.store.Set(ctx, pauseKey, val, 0); err != nil {
+		slog.Warn("outbox pause flag redis set failed; local only", "err", err)
+	}
 }
 
 func (r *Relay) Paused() bool {
+	if r.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		v, err := r.store.Get(ctx, pauseKey)
+		if err == nil {
+			return v == "1"
+		}
+	}
 	return r.paused.Load()
 }
 
@@ -102,7 +133,7 @@ func (r *Relay) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if r.paused.Load() {
+			if r.Paused() {
 				continue
 			}
 			if _, err := r.RelayOnce(ctx); err != nil {

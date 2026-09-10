@@ -55,8 +55,8 @@ func main() {
 		}),
 
 		fx.Provide(outbox.NewWriter),
-		fx.Provide(func(db *gorm.DB, p *kafka.Producer) *outbox.Relay {
-			return outbox.NewRelay(db, p)
+		fx.Provide(func(db *gorm.DB, p *kafka.Producer, rdb *appredis.Client) *outbox.Relay {
+			return outbox.NewRelay(db, p, rdb)
 		}),
 
 		fx.Provide(func(p *kafka.Producer) product.EventPublisher { return p }),

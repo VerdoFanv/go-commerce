@@ -74,7 +74,9 @@ GET /products/:id
   Redis error/miss → Postgres → SET cache (error SET diabaikan)
 ```
 
-Redis down ≠ request gagal.
+Redis down ≠ request gagal **di dalam proses**. Tapi Redis = **critical readiness** → k3s mengeluarkan pod dari Service sampai Redis kembali. Bedakan “handler FO” vs “cluster traffic”.
+
+Setelah order hold/release, cache `product:{id}` di-invalidate (jangan percaya stock stale).
 
 ---
 
@@ -97,6 +99,21 @@ Event tak ter-decode (ID kosong)
 
 ---
 
+## Cerita F — Infra mati (lanjut ke modul 10)
+
+Ringkas:
+
+| Dep | Ready | Commerce HTTP |
+|-----|-------|---------------|
+| Typesense down | degraded | CRUD OK; search 503 |
+| Mongo down | degraded | API OK; audit worker telat/DLQ |
+| Kafka down | (bukan ready check) | Order 201 + outbox; product event bisa hilang |
+| Outbox pause | — | Order 201; pending naik sampai resume |
+
+Full matrix + script: [10-failure-ops.md](10-failure-ops.md) · [`../FAILURE-RUNBOOK.md`](../FAILURE-RUNBOOK.md)
+
+---
+
 ## Peta “mau ubah X, edit Y”
 
 | Mau ubah… | Edit… |
@@ -110,6 +127,7 @@ Event tak ter-decode (ID kosong)
 | Schema | `migrations/*.sql` (bukan AutoMigrate) |
 | Route baru | `handler.RegisterRoutes` + `server.NewEngine` |
 | Boot wiring | `cmd/api` / `cmd/worker` |
+| Ready critical vs optional | `internal/http/health/` |
 
 ---
 
@@ -117,4 +135,5 @@ Event tak ter-decode (ID kosong)
 
 1. [01-peta-folder](01-peta-folder.md)  
 2. [09-commerce-reliability](09-commerce-reliability.md) kalau fokus bisnis  
-3. Ops: [`../PANDUAN-BELAJAR.md`](../PANDUAN-BELAJAR.md)
+3. [10-failure-ops](10-failure-ops.md) untuk chaos nyata  
+4. Ops: [`../PANDUAN-BELAJAR.md`](../PANDUAN-BELAJAR.md) · Postman: [`../postman/`](../postman/)

@@ -78,6 +78,12 @@ Poison (ID kosong) → DLQ tanpa buang retry Mongo.
 
 ## At-least-once checklist
 
+Fetch gagal (broker blip) → **retry + exponential backoff** (bukan exit diam-diam meninggalkan metrics server hidup tanpa consumer). Lihat loop di `cmd/worker/main.go`. Notifier API (`notify.Hub`) sama.
+
+---
+
+## At-least-once + idempotency
+
 1. Commit Kafka offset **hanya** jika `dispatch.Handle` return nil.
 2. Crash setelah side effect + sebelum commit → redelivery.
 3. Inbox / unique keys / reservation status mencegah efek dobel.
@@ -89,5 +95,6 @@ Poison (ID kosong) → DLQ tanpa buang retry Mongo.
 1. `POST /lab/kafka/ping` → log worker → `GET /lab/mongo/events`.
 2. Create order → tunggu status `paid` → cek `stock_ledger` di Postgres.
 3. Kill worker mid-flight → pastikan order tetap konsisten setelah restart.
+4. Stop Kafka sebentar → pastikan worker log `will retry` lalu recover (modul [10](10-failure-ops.md)).
 
 Lanjut → [08-alur-end-to-end.md](08-alur-end-to-end.md)

@@ -12,7 +12,7 @@ info:
 
     - `errorCode` — machine-readable code stabil (mis. `AUTH_TOKEN_EXPIRED`, `PRODUCT_NOT_FOUND`).
     - `meta` — pagination cursor untuk endpoint list.
-  version: 2.0.0
+  version: 2.1.0
 servers:
   - url: http://localhost:8080
     description: Local
@@ -21,7 +21,9 @@ tags:
   - name: Health
   - name: Authentication
   - name: Products
+  - name: Wishlists
   - name: Orders
+  - name: Lab
   - name: Realtime
 
 # Health probes & /metrics intentionally sit OUTSIDE /api/v1 — load balancers,
@@ -46,22 +48,62 @@ paths:
   /health/ready:
     get:
       tags: [Health]
-      summary: Readiness probe (all dependencies checked)
+      summary: Readiness probe (critical deps must be up)
+      description: |
+        **Critical** (503 if down): `postgres`, `redis`.
+        **Optional** (200 `degraded` if down): `mongo`, `typesense`.
+        Optional failures keep the pod in the Service so CRUD/orders survive
+        search/audit outages; search itself returns 503 via circuit breaker.
       security: []
       responses:
         "200":
-          description: All dependencies healthy
+          description: Ready or degraded (optional deps down)
+          content:
+            application/json:
+              examples:
+                ready:
+                  value:
+                    success: true
+                    message: ready
+                    data:
+                      checks:
+                        postgres: ok
+                        redis: ok
+                        mongo: ok
+                        typesense: ok
+                degraded:
+                  value:
+                    success: true
+                    message: degraded
+                    data:
+                      mode: degraded
+                      checks:
+                        postgres: ok
+                        redis: ok
+                        mongo: "down: ..."
+                        typesense: ok
+        "503":
+          description: Critical dependency down
           content:
             application/json:
               example:
-                success: true
-                message: ready
+                success: false
+                message: service unavailable
+                errorCode: SERVICE_UNAVAILABLE
                 data:
+                  mode: unavailable
                   checks:
                     postgres: ok
-                    redis: ok
-                    mongo: ok
-                    typesense: ok
+                    redis: "down: ..."
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Alias of /health/ready
+      security: []
+      responses:
+        "200":
+          description: Same as /health/ready
         "503":
           $ref: "#/components/responses/Error"
 
@@ -479,7 +521,8 @@ paths:
   /api/v1/orders/{id}/fulfill:
     post:
       tags: [Orders]
-      summary: Mark paid order as fulfilled
+      summary: Mark paid order as fulfilled (admin only)
+      description: Requires JWT role `admin`. Buyers receive 403.
       security:
         - ApiKeyAuth: []
         - BearerAuth: []
@@ -491,25 +534,269 @@ paths:
       responses:
         "200":
           description: Fulfilled
+        "403":
+          description: Caller is not admin
         "409":
           description: Illegal state transition
+
+  /api/v1/wishlists:
+    get:
+      tags: [Wishlists]
+      summary: List my wishlist items
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Wishlist rows
+    post:
+      tags: [Wishlists]
+      summary: Add product to wishlist
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId]
+              properties:
+                productId: { type: integer }
+                note: { type: string }
+      responses:
+        "201":
+          description: Added
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/wishlists/count:
+    get:
+      tags: [Wishlists]
+      summary: Wishlist item count (Redis-cached)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Count
+
+  /api/v1/wishlists/{id}:
+    delete:
+      tags: [Wishlists]
+      summary: Remove wishlist row
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Removed
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/lab/overview:
+    get:
+      tags: [Lab]
+      summary: Dependency snapshot (admin, non-prod)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Counts / ping summary
+        "403":
+          description: Not admin
+
+  /api/v1/lab/commerce/failure-matrix:
+    get:
+      tags: [Lab]
+      summary: Expected behaviour per failure mode (static JSON)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Matrix rows
+
+  /api/v1/lab/outbox/pending:
+    get:
+      tags: [Lab]
+      summary: Unpublished outbox rows + paused flag
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Pending events
+
+  /api/v1/lab/outbox/pause:
+    post:
+      tags: [Lab]
+      summary: Pause outbox relay on this API pod (chaos)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Paused
+
+  /api/v1/lab/outbox/resume:
+    post:
+      tags: [Lab]
+      summary: Resume outbox relay
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Resumed
+
+  /api/v1/lab/outbox/relay-once:
+    post:
+      tags: [Lab]
+      summary: Force one publish cycle (works even while paused)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Cycle result
+
+  /api/v1/lab/postgres/summary:
+    get:
+      tags: [Lab]
+      summary: Table counts
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Summary
+
+  /api/v1/lab/postgres/samples:
+    get:
+      tags: [Lab]
+      summary: Sample products
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        "200":
+          description: Samples
+
+  /api/v1/lab/redis/product/{id}:
+    get:
+      tags: [Lab]
+      summary: Peek product cache entry
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Hit/miss + TTL
+    delete:
+      tags: [Lab]
+      summary: Invalidate product cache
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Invalidated
+
+  /api/v1/lab/mongo/events:
+    get:
+      tags: [Lab]
+      summary: Recent Mongo audit events
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Events
+
+  /api/v1/lab/kafka/ping:
+    post:
+      tags: [Lab]
+      summary: Publish lab.ping → worker → Mongo
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Published
+
+  /api/v1/lab/typesense:
+    get:
+      tags: [Lab]
+      summary: Typesense stats + optional search
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Explore payload
+
+  /api/v1/lab/typesense/reindex:
+    post:
+      tags: [Lab]
+      summary: Rebuild Typesense from Postgres
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Reindexed
 
   /ws/products:
     get:
       tags: [Realtime]
       summary: WebSocket — real-time product event stream
       description: |
-        Upgrade to WebSocket to receive `product.created` / `product.updated` / `product.deleted`
-        events as they flow through Kafka (fan-out by the notifier consumer group).
+        Upgrade to WebSocket to receive product events from Kafka (notifier group).
 
-        Auth via query param because browsers cannot set headers on WebSocket:
-        `ws://localhost:8080/ws/products?token=<accessToken>`
+        Query params (browsers cannot set custom headers on WS upgrade):
+        - `token` — access JWT
+        - `apikey` — same API key as REST (also accepted via `apikey` / `X-API-Key` header)
+
+        Example: `ws://localhost:8080/ws/products?apikey=<key>&token=<accessToken>`
       security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+        - name: apikey
+          in: query
+          required: true
+          schema: { type: string }
       responses:
         "101":
           description: Switching Protocols — event stream begins
         "401":
-          description: Invalid token
+          description: Invalid token or missing apikey
 
 components:
   parameters:

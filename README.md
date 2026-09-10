@@ -17,7 +17,7 @@ It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credibl
 
 Beyond infra, it also labs **commerce reliability** problems found in large systems: order state machine, inventory hold, payment choreography, transactional outbox, consumer inbox, stock ledger, and a live failure matrix.
 
-**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Benchmark / capacity](docs/BENCHMARK.md) · [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
+**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Benchmark / capacity](docs/BENCHMARK.md) · [Failure runbook](docs/FAILURE-RUNBOOK.md) · [Postman](docs/postman/) · [OpenAPI](docs/openapi.yaml) · [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
@@ -302,7 +302,7 @@ All `/api/v1` routes require `apikey`; protected routes also need `Authorization
 | `GET`                 | `/api/v1/lab/*`                        | +bearer **admin**, non-prod   | Infra / outbox chaos                            |
 | `GET`                 | `/ws/products?token=&apikey=`          | JWT + apikey                  | Real-time events                                |
 
-Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
+Full contract: [`docs/openapi.yaml`](docs/openapi.yaml) · Postman collection + env: [`docs/postman/`](docs/postman/) (also served under `/docs` when non-prod if you copy assets — primary import is from repo).
 
 ---
 
@@ -357,6 +357,7 @@ make ci                 # local CI-equivalent checks
 ## Load testing
 
 Capacity evidence lives in [`docs/BENCHMARK.md`](docs/BENCHMARK.md) — not in feature bullets.
+Failure / self-heal evidence: [`docs/FAILURE-RUNBOOK.md`](docs/FAILURE-RUNBOOK.md) + `./scripts/chaos-verify.sh`.
 
 ```bash
 # API must be up. Lab example:

@@ -20,7 +20,7 @@ Kedua binary pakai **Uber fx**.
 | Config | `config.Load` | `Config` |
 | Platform | `database`, `redis`, `mongo`, `typesense`, `telemetry` | client infra |
 | Kafka | Producer (products topic), Consumer (notifier group) | publish + WS consume |
-| Outbox | `outbox.NewWriter`, `outbox.NewRelay(db, producer)` | TX enqueue + poll publish |
+| Outbox | `outbox.NewWriter`, `outbox.NewRelay(db, producer, redis)` | TX enqueue + poll publish; pause flag di Redis (multi-replica) |
 | HTTP features | auth / product / wishlist / **order** / lab | handlers |
 | Ops | health, notify hub/notifier | probes + WS |
 | Server | `server.NewEngine`, `NewHTTPServer` | Gin |

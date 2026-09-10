@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/verdofanv/golang-be/internal/metrics"
@@ -80,9 +81,11 @@ func NewNotifier(consumer *kafka.Consumer, hub *Hub) *Notifier {
 	return &Notifier{consumer: consumer, hub: hub}
 }
 
-// Run blocks until ctx is canceled (shutdown) or the consumer dies.
+// Run blocks until ctx is canceled. Transient Kafka fetch errors retry with
+// backoff so a brief broker blip does not permanently kill WebSocket fan-out.
 func (n *Notifier) Run(ctx context.Context) {
 	slog.Info("notifier listening for product events")
+	backoff := time.Second
 	for {
 		msg, err := n.consumer.Fetch(ctx)
 		if err != nil {
@@ -90,9 +93,18 @@ func (n *Notifier) Run(ctx context.Context) {
 				slog.Info("notifier shutting down")
 				return
 			}
-			slog.Error("notifier fetch failed", "err", err)
-			return
+			slog.Error("notifier fetch failed; will retry", "err", err, "backoff", backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+			continue
 		}
+		backoff = time.Second
 
 		// Poison pill guard: undecodable events are skipped, never broadcast.
 		if msg.Event.ID == "" {

@@ -79,10 +79,13 @@ Observability + hygiene — tidak ubah business logic.
 | Symbol | Fungsi |
 |--------|--------|
 | `Handler.live` | Proses hidup (selalu OK) |
-| `Handler.ready` | Ping semua `Checker` (Postgres, Redis, Mongo, Typesense) |
-| `PostgresCheck` / `RedisCheck` / `MongoCheck` / `TypesenseCheck` | Adapter ping |
+| `Handler.ready` | Ping checkers: **critical** (postgres, redis) → 503; **optional** (mongo, typesense) → 200 `degraded` |
+| `PostgresCheck` / `RedisCheck` | Critical |
+| `MongoCheck` / `TypesenseCheck` | Optional (tetap dilaporkan di `data.checks`) |
 
-k3s readiness pakai `/health/ready` — pod tidak terima traffic kalau dependency kritis down.
+k3s readiness pakai `/health/ready` — pod keluar Service hanya jika dependency **kritis** down. Typesense/Mongo down tidak menguras API dari traffic (sesuai spek degrade).
+
+Detail chaos: [10-failure-ops.md](10-failure-ops.md).
 
 ---
 

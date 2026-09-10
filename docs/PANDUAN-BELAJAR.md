@@ -4,7 +4,10 @@ Dokumen **praktek setup / deploy / infra** untuk lab single-node (Ubuntu + k3s +
 
 **Belajar dari kode** (folder, fungsi, alur E2E) dipisah biar tidak numpuk:
 
-→ **[`docs/belajar/README.md`](belajar/README.md)** — mulai dari situ.
+→ **[`docs/belajar/README.md`](belajar/README.md)** — mulai dari situ (modul **10** = chaos/on-call).
+
+API clients: **[`docs/openapi.yaml`](openapi.yaml)** · **[`docs/postman/`](postman/)**  
+Failure matrix hidup: **[`docs/FAILURE-RUNBOOK.md`](FAILURE-RUNBOOK.md)** · capacity: **[`docs/BENCHMARK.md`](BENCHMARK.md)**
 
 > **Secrets:** password DB/Mongo hanya di `.env` / `k8s/secret.yaml` / compose `infra-db` di server — **jangan** tulis ulang ke git.
 
@@ -30,6 +33,8 @@ Baca sambil praktek. Jangan hanya scroll.
 12. [Troubleshooting](#12-troubleshooting)
 13. [Latihan harian](#13-latihan-harian)
 14. [Checklist keamanan lab](#14-checklist-keamanan-lab)
+15. [Chaos & recovery](#15-chaos--recovery)
+16. [Postman / OpenAPI](#16-postman--openapi)
 
 ---
 
@@ -628,6 +633,8 @@ docker inspect golang-be-kafka-1 --format '{{.State.Status}} {{.State.ExitCode}}
 | 10 | Failure | Stop Typesense/Kafka, catat perilaku API |
 | 11 | k3s ops | Rollout restart + baca events |
 | 12 | Obs | 1 panel Grafana yang kamu jelaskan |
+| 13 | Chaos script | `./scripts/chaos-verify.sh` hijau |
+| 14 | Postman | Import collection + env lab, happy path end-to-end |
 
 ---
 
@@ -643,6 +650,40 @@ docker inspect golang-be-kafka-1 --format '{{.State.Status}} {{.State.ExitCode}}
 
 ---
 
+## 15. Chaos & recovery
+
+Jangan cuma baca failure-matrix JSON — **matikan** dependency dan catat:
+
+| Aksi | Expect singkat |
+|------|----------------|
+| `POST /lab/outbox/pause` → order | 201 + pending outbox |
+| Stop Typesense | ready `degraded`; search 503; CRUD OK |
+| Stop Redis | ready **503** (critical) |
+| Stop Kafka | order 201 + outbox; product event bisa hilang |
+| Delete worker pod | order eventually paid setelah restart |
+
+Detail: [`FAILURE-RUNBOOK.md`](FAILURE-RUNBOOK.md) · [`belajar/10-failure-ops.md`](belajar/10-failure-ops.md)
+
+```bash
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/chaos-verify.sh
+```
+
+---
+
+## 16. Postman / OpenAPI
+
+| Asset | Path |
+|-------|------|
+| OpenAPI 3 | [`openapi.yaml`](openapi.yaml) — juga `/docs` non-prod |
+| Collection | [`postman/Golang-BE.postman_collection.json`](postman/Golang-BE.postman_collection.json) |
+| Env lab | [`postman/Golang-BE.lab.postman_environment.json`](postman/Golang-BE.lab.postman_environment.json) |
+| Env local | [`postman/Golang-BE.local.postman_environment.json`](postman/Golang-BE.local.postman_environment.json) |
+| Cara pakai | [`postman/README.md`](postman/README.md) |
+
+Urutan Postman: Login buyer → Login admin → Create product → Wishlist → Create order → Lab outbox pause/resume.
+
+---
+
 ## Referensi path
 
 | Topik | Path |
@@ -653,6 +694,9 @@ docker inspect golang-be-kafka-1 --format '{{.State.Status}} {{.State.ExitCode}}
 | Order | `internal/http/order/` |
 | Manifests | `k8s/` |
 | OpenAPI | `docs/openapi.yaml` |
+| Postman | `docs/postman/` |
+| Failure runbook | `docs/FAILURE-RUNBOOK.md` |
+| Benchmark | `docs/BENCHMARK.md` |
 | README utama | `README.md` |
 | Deploy | lokal commit/push → server `git pull` + rebuild |
 

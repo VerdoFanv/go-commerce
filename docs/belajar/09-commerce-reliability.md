@@ -128,10 +128,17 @@ curl -s -X POST $HOST/api/v1/lab/outbox/relay-once -H "$APIKEY" -H "Authorizatio
 ## Load / concurrency
 
 ```bash
-chmod +x scripts/load-orders.sh
+chmod +x scripts/load-orders.sh scripts/bench.sh scripts/chaos-verify.sh
 API=... API_KEY=... TOKEN=... PRODUCT_ID=1 N=20 ./scripts/load-orders.sh
 # Pastikan stock produk tidak negatif di Postgres
+
+HOST=http://192.168.0.155 API_KEY=... ./scripts/bench.sh      # capacity matrix
+HOST=... API_KEY=... ./scripts/chaos-verify.sh                 # failure claims
 ```
+
+Capacity: [`../BENCHMARK.md`](../BENCHMARK.md) · Failure: [`../FAILURE-RUNBOOK.md`](../FAILURE-RUNBOOK.md) · Modul: [10-failure-ops.md](10-failure-ops.md)
+
+API clients: OpenAPI [`../openapi.yaml`](../openapi.yaml) · Postman [`../postman/`](../postman/)
 
 ---
 
@@ -164,4 +171,4 @@ API=... API_KEY=... TOKEN=... PRODUCT_ID=1 N=20 ./scripts/load-orders.sh
 - [ ] Baca `stock_ledger` untuk order yang di-hold  
 - [ ] Buyer: `GET /products/catalog` melihat katalog seller  
 
-Sebelumnya: [08-alur-end-to-end.md](08-alur-end-to-end.md) · Index: [README.md](README.md)
+Sebelumnya: [08-alur-end-to-end.md](08-alur-end-to-end.md) · Lanjut: [10-failure-ops.md](10-failure-ops.md) · Index: [README.md](README.md)
