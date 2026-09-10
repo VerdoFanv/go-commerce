@@ -38,15 +38,15 @@ type ReservationModel struct {
 func (ReservationModel) TableName() string { return "inventory_reservations" }
 
 type PaymentModel struct {
-	ID             uint      `gorm:"primaryKey"`
-	OrderID        uint      `gorm:"column:order_id;not null;index"`
-	IdempotencyKey string    `gorm:"column:idempotency_key;size:128;not null"`
-	Status         string    `gorm:"size:32;not null"`
-	Amount         float64   `gorm:"not null"`
-	ProviderRef    string    `gorm:"column:provider_ref;size:128"`
-	Attempt        int       `gorm:"not null;default:1"`
-	CreatedAt      time.Time `gorm:"column:created_at"`
-	UpdatedAt      time.Time `gorm:"column:updated_at"`
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	OrderID        uint      `gorm:"column:order_id;not null;index" json:"orderId"`
+	IdempotencyKey string    `gorm:"column:idempotency_key;size:128;not null" json:"idempotencyKey"`
+	Status         string    `gorm:"size:32;not null" json:"status"`
+	Amount         float64   `gorm:"not null" json:"amount"`
+	ProviderRef    string    `gorm:"column:provider_ref;size:128" json:"providerRef"`
+	Attempt        int       `gorm:"not null;default:1" json:"attempt"`
+	CreatedAt      time.Time `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt      time.Time `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 func (PaymentModel) TableName() string { return "payments" }

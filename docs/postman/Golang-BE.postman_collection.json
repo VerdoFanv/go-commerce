@@ -1,13 +1,17 @@
 {
   "info": {
     "name": "Golang BE",
-    "description": "Full API surface for golang-be (auth, products, wishlist, orders, lab chaos).\n\nImport env: Golang-BE.lab / Golang-BE.local.\nDocs: docs/openapi.yaml + docs/FAILURE-RUNBOOK.md\n\n**Tokens:** Login scripts write `accessToken` / `refreshToken` / `adminToken` to the **active Environment** (and collection). Select Lab or Local env first \u2014 empty env values previously shadowed collection vars.",
+    "description": "REST + lab chaos for golang-be.\n\nImport Lab or Local environment and select it first.\nLogin scripts write accessToken/refreshToken/adminToken to the **active environment**.\nURLs use string form `{{baseUrl}}/path` (avoids Postman host double-encoding).\nOrder/wishlist bodies use numeric `{{productId}}` (not a JSON string).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://127.0.0.1:8080"
+    },
+    {
+      "key": "wsUrl",
+      "value": "ws://127.0.0.1:8080"
     },
     {
       "key": "apiKey",
@@ -46,6 +50,14 @@
       "value": "user123"
     },
     {
+      "key": "sellerEmail",
+      "value": "seller@golang-be.dev"
+    },
+    {
+      "key": "sellerPassword",
+      "value": "seller123"
+    },
+    {
       "key": "adminEmail",
       "value": "admin@golang-be.dev"
     },
@@ -70,17 +82,8 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/health/live",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health",
-                "live"
-              ]
-            },
-            "description": "Process alive \u2014 no deps"
+            "url": "{{baseUrl}}/health/live",
+            "description": ""
           }
         },
         {
@@ -94,17 +97,8 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/health/ready",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health",
-                "ready"
-              ]
-            },
-            "description": "Critical deps (postgres, redis). Optional mongo/typesense \u2192 degraded 200."
+            "url": "{{baseUrl}}/health/ready",
+            "description": "Critical: postgres+redis. Optional mongo/typesense \u2192 degraded 200."
           }
         },
         {
@@ -118,15 +112,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/health",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health"
-              ]
-            },
+            "url": "{{baseUrl}}/health",
             "description": ""
           }
         },
@@ -141,15 +127,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/metrics",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "metrics"
-              ]
-            },
+            "url": "{{baseUrl}}/metrics",
             "description": ""
           }
         }
@@ -174,18 +152,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/authentication/register",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "authentication",
-                "register"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/authentication/register",
             "description": "",
             "body": {
               "mode": "raw",
@@ -201,15 +168,13 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
-                  "pm.test('register 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('register 201', () => pm.response.to.have.status(201));",
                   "if (pm.response.code === 201) {",
-                  "  const d = pm.response.json().data || {};",
-                  "  const tokens = d.tokens || {};",
-                  "  setVar('accessToken', tokens.accessToken);",
-                  "  setVar('refreshToken', tokens.refreshToken);",
+                  "  const t = (pm.response.json().data || {}).tokens || {};",
+                  "  setVar('accessToken', t.accessToken);",
+                  "  setVar('refreshToken', t.refreshToken);",
                   "}"
                 ]
               }
@@ -217,7 +182,7 @@
           ]
         },
         {
-          "name": "Login (buyer/seller)",
+          "name": "Login (buyer)",
           "request": {
             "method": "POST",
             "header": [
@@ -231,18 +196,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/authentication/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "authentication",
-                "login"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/authentication/login",
             "description": "",
             "body": {
               "mode": "raw",
@@ -258,21 +212,59 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
-                  "pm.test('login 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('login 200', () => pm.response.to.have.status(200));",
                   "if (pm.response.code === 200) {",
-                  "  const body = pm.response.json();",
-                  "  const d = body.data || {};",
-                  "  const tokens = d.tokens || d; // login: data.tokens; refresh: data is tokens",
-                  "  if (!tokens || !tokens.accessToken) {",
-                  "    console.warn('login OK but no accessToken in', JSON.stringify(body));",
-                  "    return;",
-                  "  }",
-                  "  setVar('accessToken', tokens.accessToken);",
-                  "  setVar('refreshToken', tokens.refreshToken);",
-                  "  console.log('saved accessToken/refreshToken to environment + collection');",
+                  "  const d = pm.response.json().data || {};",
+                  "  const t = d.tokens || {};",
+                  "  setVar('accessToken', t.accessToken);",
+                  "  setVar('refreshToken', t.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (seller)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/authentication/login",
+            "description": "Optional \u2014 overwrites accessToken with seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{sellerEmail}}\",\n  \"password\": \"{{sellerPassword}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) {",
+                  "  if (v === undefined || v === null) return;",
+                  "  pm.collectionVariables.set(k, String(v));",
+                  "  try { pm.environment.set(k, String(v)); } catch (e) {}",
+                  "}",
+                  "pm.test('login 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const d = pm.response.json().data || {};",
+                  "  const t = d.tokens || {};",
+                  "  setVar('accessToken', t.accessToken);",
+                  "  setVar('refreshToken', t.refreshToken);",
                   "}"
                 ]
               }
@@ -294,18 +286,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/authentication/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "authentication",
-                "login"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/authentication/login",
             "description": "",
             "body": {
               "mode": "raw",
@@ -321,21 +302,12 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
-                  "pm.test('admin login 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('admin login 200', () => pm.response.to.have.status(200));",
                   "if (pm.response.code === 200) {",
-                  "  const body = pm.response.json();",
-                  "  const d = body.data || {};",
-                  "  const tokens = d.tokens || d;",
-                  "  if (!tokens || !tokens.accessToken) {",
-                  "    console.warn('admin login OK but no accessToken');",
-                  "    return;",
-                  "  }",
-                  "  setVar('adminToken', tokens.accessToken);",
-                  "  // Keep buyer tokens untouched; admin uses adminToken.",
-                  "  console.log('saved adminToken to environment + collection');",
+                  "  const t = (pm.response.json().data || {}).tokens || {};",
+                  "  setVar('adminToken', t.accessToken);",
                   "}"
                 ]
               }
@@ -358,18 +330,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/authentication/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "authentication",
-                "me"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/authentication/me",
             "description": ""
           }
         },
@@ -388,18 +349,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/authentication/refresh-token",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "authentication",
-                "refresh-token"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/authentication/refresh-token",
             "description": "",
             "body": {
               "mode": "raw",
@@ -415,16 +365,13 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
-                  "pm.test('refresh 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('refresh 200', () => pm.response.to.have.status(200));",
                   "if (pm.response.code === 200) {",
                   "  const d = pm.response.json().data || {};",
-                  "  // Refresh returns AuthTokens directly under data (not data.tokens).",
-                  "  const tokens = d.accessToken ? d : (d.tokens || {});",
-                  "  setVar('accessToken', tokens.accessToken);",
-                  "  setVar('refreshToken', tokens.refreshToken);",
+                  "  setVar('accessToken', d.accessToken);",
+                  "  setVar('refreshToken', d.refreshToken);",
                   "}"
                 ]
               }
@@ -446,18 +393,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/authentication/logout",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "authentication",
-                "logout"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/authentication/logout",
             "description": "",
             "body": {
               "mode": "raw",
@@ -491,17 +427,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/products",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "products"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/products",
             "description": "",
             "body": {
               "mode": "raw",
@@ -517,12 +443,9 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
-                  "if (pm.response.code === 201) {",
-                  "  setVar('productId', pm.response.json().data.id);",
-                  "}"
+                  "if (pm.response.code === 201) setVar('productId', pm.response.json().data.id);"
                 ]
               }
             }
@@ -544,23 +467,47 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/products?limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "products"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/products?limit=10",
+            "description": ""
+          }
+        },
+        {
+          "name": "Catalog",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/products/catalog?limit=10",
+            "description": ""
+          }
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/products/search?q=kopi&limit=10",
             "description": ""
           }
         },
@@ -580,18 +527,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/products/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "products",
-                "{{productId}}"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
             "description": ""
           }
         },
@@ -615,18 +551,7 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/products/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "products",
-                "{{productId}}"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
             "description": "",
             "body": {
               "mode": "raw",
@@ -635,9 +560,9 @@
           }
         },
         {
-          "name": "Search",
+          "name": "Delete product",
           "request": {
-            "method": "GET",
+            "method": "DELETE",
             "header": [
               {
                 "key": "apikey",
@@ -650,66 +575,8 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/products/search?q=kopi&limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "products",
-                "search"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "kopi"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Catalog",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "apikey",
-                "value": "{{apiKey}}",
-                "type": "text"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/products/catalog?limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "products",
-                "catalog"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            },
-            "description": ""
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
+            "description": "Owner or admin. Prefer a disposable productId."
           }
         }
       ]
@@ -738,21 +605,11 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/wishlists",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "wishlists"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/wishlists",
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"note\": \"want\"\n}"
+              "raw": "{\n  \"productId\": {{productId}},\n  \"note\": \"want\"\n}"
             }
           },
           "event": [
@@ -764,12 +621,10 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
                   "if (pm.response.code === 201 || pm.response.code === 200) {",
-                  "  const d = pm.response.json().data;",
-                  "  if (d && d.id) setVar('wishlistId', d.id);",
+                  "  const d = pm.response.json().data; if (d && d.id) setVar('wishlistId', d.id);",
                   "}"
                 ]
               }
@@ -792,17 +647,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/wishlists",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "wishlists"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/wishlists",
             "description": ""
           }
         },
@@ -822,18 +667,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/wishlists/count",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "wishlists",
-                "count"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/wishlists/count",
             "description": ""
           }
         },
@@ -853,18 +687,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/wishlists/{{wishlistId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "wishlists",
-                "{{wishlistId}}"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/wishlists/{{wishlistId}}",
             "description": ""
           }
         }
@@ -899,21 +722,11 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/orders",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders"
-              ]
-            },
-            "description": "",
+            "url": "{{baseUrl}}/api/v1/orders",
+            "description": "Requires Idempotency-Key. productId must be a JSON number.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"qty\": 1\n    }\n  ]\n}"
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": {{productId}},\n      \"qty\": 1\n    }\n  ]\n}"
             }
           },
           "event": [
@@ -925,12 +738,9 @@
                   "function setVar(k, v) {",
                   "  if (v === undefined || v === null) return;",
                   "  pm.collectionVariables.set(k, String(v));",
-                  "  // Active environment wins variable resolution \u2014 always write tokens there.",
                   "  try { pm.environment.set(k, String(v)); } catch (e) {}",
                   "}",
-                  "if (pm.response.code === 201) {",
-                  "  setVar('orderId', pm.response.json().data.id);",
-                  "}"
+                  "if (pm.response.code === 201) setVar('orderId', pm.response.json().data.id);"
                 ]
               }
             }
@@ -952,23 +762,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/orders?limit=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "20"
-                }
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/orders?limit=20",
             "description": ""
           }
         },
@@ -988,18 +782,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders",
-                "{{orderId}}"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}",
             "description": ""
           }
         },
@@ -1023,56 +806,12 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/pay",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders",
-                "{{orderId}}",
-                "pay"
-              ]
-            },
-            "description": "Lab HTTP pay path \u2014 worker payment is canonical for Kafka-driven flow",
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}/pay",
+            "description": "Lab override. Worker auto-pay is the canonical Kafka path. Response: { order, payment }.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"outcome\": \"success\",\n  \"key\": \"pay-{{$guid}}\"\n}"
             }
-          }
-        },
-        {
-          "name": "Cancel order",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "apikey",
-                "value": "{{apiKey}}",
-                "type": "text"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/cancel",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders",
-                "{{orderId}}",
-                "cancel"
-              ]
-            },
-            "description": ""
           }
         },
         {
@@ -1091,27 +830,35 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/fulfill",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders",
-                "{{orderId}}",
-                "fulfill"
-              ]
-            },
-            "description": "Requires admin role \u2014 403 for buyer"
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}/fulfill",
+            "description": "Admin only. Run while order is paid \u2014 before cancel."
+          }
+        },
+        {
+          "name": "Cancel order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/orders/{{orderId}}/cancel",
+            "description": "Negative/cleanup path \u2014 use a separate pending order if you already fulfilled."
           }
         }
       ]
     },
     {
       "name": "5. Lab / chaos (admin, non-prod)",
-      "description": "APP_ENV=production disables this folder. Need admin JWT.",
+      "description": "Disabled when APP_ENV=production. Requires admin JWT.",
       "item": [
         {
           "name": "Overview",
@@ -1129,18 +876,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/overview",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "overview"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/overview",
             "description": ""
           }
         },
@@ -1160,19 +896,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/commerce/failure-matrix",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "commerce",
-                "failure-matrix"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/commerce/failure-matrix",
             "description": ""
           }
         },
@@ -1192,19 +916,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/postgres/summary",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "postgres",
-                "summary"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/postgres/summary",
             "description": ""
           }
         },
@@ -1224,25 +936,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/postgres/samples?limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "postgres",
-                "samples"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/postgres/samples?limit=10",
             "description": ""
           }
         },
@@ -1262,20 +956,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/redis/product/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "redis",
-                "product",
-                "{{productId}}"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/redis/product/{{productId}}",
             "description": ""
           }
         },
@@ -1295,20 +976,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/redis/product/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "redis",
-                "product",
-                "{{productId}}"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/redis/product/{{productId}}",
             "description": ""
           }
         },
@@ -1328,20 +996,8 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/kafka/ping",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "kafka",
-                "ping"
-              ]
-            },
-            "description": ""
+            "url": "{{baseUrl}}/api/v1/lab/kafka/ping",
+            "description": "Returns 201 Created"
           }
         },
         {
@@ -1360,25 +1016,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/mongo/events?limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "mongo",
-                "events"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/mongo/events?limit=10",
             "description": ""
           }
         },
@@ -1398,24 +1036,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/typesense?q=kopi",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "typesense"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "kopi"
-                }
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/typesense?q=kopi",
             "description": ""
           }
         },
@@ -1435,19 +1056,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/typesense/reindex",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "typesense",
-                "reindex"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/typesense/reindex",
             "description": ""
           }
         },
@@ -1467,19 +1076,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/outbox/pause",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "outbox",
-                "pause"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/outbox/pause",
             "description": ""
           }
         },
@@ -1499,19 +1096,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/outbox/pending",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "outbox",
-                "pending"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/outbox/pending?limit=20",
             "description": ""
           }
         },
@@ -1531,19 +1116,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/outbox/resume",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "outbox",
-                "resume"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/outbox/resume",
             "description": ""
           }
         },
@@ -1563,19 +1136,7 @@
                 "type": "text"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/lab/outbox/relay-once",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "lab",
-                "outbox",
-                "relay-once"
-              ]
-            },
+            "url": "{{baseUrl}}/api/v1/lab/outbox/relay-once",
             "description": ""
           }
         }
@@ -1591,7 +1152,7 @@
             "method": "GET",
             "header": [],
             "url": "{{wsUrl}}/ws/products?apikey={{apiKey}}&token={{accessToken}}",
-            "description": "Postman WS: New \u2192 WebSocket Request. Needs apikey + JWT access token."
+            "description": "Use Postman New \u2192 WebSocket Request. Needs apikey + access JWT."
           }
         }
       ]

@@ -2,17 +2,18 @@ openapi: 3.0.3
 info:
   title: Golang BE API
   description: |
-    Production-grade REST API dengan event-driven architecture.
+    Production-grade event-driven REST API (Gin).
 
-    Stack: Gin, PostgreSQL (versioned migrations), Redis, Kafka (event streaming + DLQ),
-    MongoDB (audit trail), Typesense (full-text search), Prometheus, OpenTelemetry.
+    Stack: PostgreSQL (SQL migrations), Redis, Kafka (+ DLQ), MongoDB audit,
+    Typesense search, Prometheus, OpenTelemetry.
 
-    Envelope response mengikuti kontrak:
-    `{ success, message, errorCode?, data, meta? }`.
+    Response envelope: `{ success, message, errorCode?, data, meta? }`.
 
-    - `errorCode` — machine-readable code stabil (mis. `AUTH_TOKEN_EXPIRED`, `PRODUCT_NOT_FOUND`).
-    - `meta` — pagination cursor untuk endpoint list.
-  version: 2.1.0
+    - `errorCode` — stable machine codes (e.g. `AUTH_TOKEN_EXPIRED`, `RESOURCE_NOT_FOUND`, `RESOURCE_CONFLICT`).
+    - `meta` — cursor pagination for list endpoints.
+    - `/api/v1` requires header `apikey` (or `X-API-Key`). Protected routes also need `Authorization: Bearer`.
+    - `/lab/*` is admin-only and disabled when `APP_ENV=production`.
+  version: 2.2.0
 servers:
   - url: http://localhost:8080
     description: Local
@@ -231,7 +232,7 @@ paths:
       summary: Current authenticated user
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: OK
@@ -248,7 +249,7 @@ paths:
       summary: List my products (cursor-paginated)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: cursor
           in: query
@@ -276,7 +277,7 @@ paths:
       summary: Create product (publishes `product.created` to Kafka)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       requestBody:
         required: true
         content:
@@ -299,7 +300,7 @@ paths:
       summary: Buyer marketplace catalog (all sellers, cursor-paginated)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: cursor
           in: query
@@ -329,7 +330,7 @@ paths:
       description: Multi-match over name + description with fuzziness. 503 with errorCode `SERVICE_UNAVAILABLE` when search is disabled.
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: q
           in: query
@@ -351,6 +352,9 @@ paths:
                 $ref: "#/components/schemas/SearchEnvelope"
         "503":
           $ref: "#/components/responses/Error"
+        "400":
+          description: Empty query
+          $ref: "#/components/responses/Error"
 
   /api/v1/products/{id}:
     get:
@@ -358,7 +362,7 @@ paths:
       summary: Product detail (Redis-cached)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductId"
       responses:
@@ -375,7 +379,7 @@ paths:
       summary: Update product (owner only, publishes `product.updated`)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductId"
       requestBody:
@@ -401,7 +405,7 @@ paths:
       description: Owners delete their own products. Users with role `admin` can delete any product (RBAC).
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductId"
       responses:
@@ -422,19 +426,31 @@ paths:
       summary: List my orders
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
       responses:
         "200":
           description: Order list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderListEnvelope" }
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Orders]
       summary: Create order (transactional outbox + stock hold)
       description: |
         Requires `Idempotency-Key`. Holds inventory and writes `order.created` to
         `outbox_events` in the same Postgres transaction. Kafka publish is async via outbox relay.
+        `productId` must be a JSON number (not a string).
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: Idempotency-Key
           in: header
@@ -454,13 +470,25 @@ paths:
                     type: object
                     required: [productId, qty]
                     properties:
-                      productId: { type: integer }
+                      productId: { type: integer, minimum: 1 }
                       qty: { type: integer, minimum: 1 }
       responses:
         "201":
           description: Order created (pending_payment)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderEnvelope" }
+        "400":
+          description: Missing Idempotency-Key or invalid body
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Product not found
+          $ref: "#/components/responses/Error"
         "409":
-          description: Insufficient stock or idempotency conflict
+          description: Insufficient stock or idempotency key reused with different body (`RESOURCE_CONFLICT`)
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
 
   /api/v1/orders/{id}:
     get:
@@ -468,15 +496,20 @@ paths:
       summary: Get order detail
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: integer, minimum: 1 }
       responses:
         "200":
           description: Order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderEnvelope" }
+        "401":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -486,7 +519,7 @@ paths:
       summary: Cancel order (releases held stock)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -501,15 +534,19 @@ paths:
   /api/v1/orders/{id}/pay:
     post:
       tags: [Orders]
-      summary: Simulate payment (success|fail|timeout)
+      summary: Lab payment override (success|fail|timeout)
+      description: |
+        Teaching override. Canonical payment is the worker on `order.created`.
+        Response `data` is `{ order, payment }` (camelCase).
+        Default outcome=`success`; default key=`pay-{orderId}`.
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: integer, minimum: 1 }
       requestBody:
         content:
           application/json:
@@ -525,8 +562,19 @@ paths:
       responses:
         "200":
           description: Payment applied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PayResponse" }
+        "400":
+          description: Invalid outcome
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: Illegal state transition
+          $ref: "#/components/responses/Error"
         "503":
-          description: Simulated timeout
+          description: Simulated timeout (`outcome=timeout`)
 
   /api/v1/orders/{id}/fulfill:
     post:
@@ -535,7 +583,7 @@ paths:
       description: Requires JWT role `admin`. Buyers receive 403.
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -555,16 +603,22 @@ paths:
       summary: List my wishlist items
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Wishlist rows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WishlistListEnvelope" }
+        "401":
+          $ref: "#/components/responses/Error"
     post:
       tags: [Wishlists]
       summary: Add product to wishlist
+      description: `productId` must be a JSON number (not a string).
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       requestBody:
         required: true
         content:
@@ -573,12 +627,20 @@ paths:
               type: object
               required: [productId]
               properties:
-                productId: { type: integer }
+                productId: { type: integer, minimum: 1 }
                 note: { type: string }
       responses:
         "201":
           description: Added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WishlistEnvelope" }
+        "400":
+          $ref: "#/components/responses/Error"
         "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: Already wishlisted
           $ref: "#/components/responses/Error"
 
   /api/v1/wishlists/count:
@@ -587,10 +649,13 @@ paths:
       summary: Wishlist item count (Redis-cached)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Count
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WishlistCountEnvelope" }
 
   /api/v1/wishlists/{id}:
     delete:
@@ -598,7 +663,7 @@ paths:
       summary: Remove wishlist row
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -614,14 +679,17 @@ paths:
     get:
       tags: [Lab]
       summary: Dependency snapshot (admin, non-prod)
+      description: All `/lab/*` routes require admin JWT and are omitted when `APP_ENV=production` (404).
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Counts / ping summary
         "403":
           description: Not admin
+        "404":
+          description: Lab disabled in production
 
   /api/v1/lab/commerce/failure-matrix:
     get:
@@ -629,7 +697,7 @@ paths:
       summary: Expected behaviour per failure mode (static JSON)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Matrix rows
@@ -640,10 +708,14 @@ paths:
       summary: Unpublished outbox rows + paused flag
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
       responses:
         "200":
-          description: Pending events
+          description: Pending events (`pendingCount`, `paused`, `items`)
 
   /api/v1/lab/outbox/pause:
     post:
@@ -651,7 +723,7 @@ paths:
       summary: Pause outbox relay on this API pod (chaos)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Paused
@@ -662,7 +734,7 @@ paths:
       summary: Resume outbox relay
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Resumed
@@ -673,7 +745,7 @@ paths:
       summary: Force one publish cycle (works even while paused)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Cycle result
@@ -684,7 +756,7 @@ paths:
       summary: Table counts
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Summary
@@ -695,7 +767,7 @@ paths:
       summary: Sample products
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: limit
           in: query
@@ -710,7 +782,7 @@ paths:
       summary: Peek product cache entry
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductId"
       responses:
@@ -721,7 +793,7 @@ paths:
       summary: Invalidate product cache
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductId"
       responses:
@@ -734,7 +806,7 @@ paths:
       summary: Recent Mongo audit events
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: limit
           in: query
@@ -746,13 +818,17 @@ paths:
   /api/v1/lab/kafka/ping:
     post:
       tags: [Lab]
-      summary: Publish lab.ping → worker → Mongo
+      summary: Publish lab.ping → worker → Mongo (admin, non-prod)
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
-        "200":
+        "201":
           description: Published
+        "403":
+          description: Not admin
+        "404":
+          description: Lab disabled in production
 
   /api/v1/lab/typesense:
     get:
@@ -760,7 +836,7 @@ paths:
       summary: Typesense stats + optional search
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       parameters:
         - name: q
           in: query
@@ -775,7 +851,7 @@ paths:
       summary: Rebuild Typesense from Postgres
       security:
         - ApiKeyAuth: []
-        - BearerAuth: []
+          BearerAuth: []
       responses:
         "200":
           description: Reindexed
@@ -807,6 +883,8 @@ paths:
           description: Switching Protocols — event stream begins
         "401":
           description: Invalid token or missing apikey
+        "426":
+          description: Upgrade Required (non-WebSocket request)
 
 components:
   parameters:
@@ -823,10 +901,12 @@ components:
       type: apiKey
       in: header
       name: apikey
+      description: Also accepted as header `X-API-Key` (same value).
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Access JWT from login/register/refresh.
 
   responses:
     Error:
@@ -854,6 +934,7 @@ components:
           description: Stable machine code
           enum:
             - RESOURCE_NOT_FOUND
+            - RESOURCE_CONFLICT
             - VALIDATION_ERROR
             - AUTH_EMAIL_TAKEN
             - AUTH_TOKEN_EXPIRED
@@ -994,8 +1075,108 @@ components:
           items:
             type: object
             properties:
-              id: { type: integer }
+              id: { type: string, description: Typesense document id (string) }
               userId: { type: integer }
               name: { type: string }
               description: { type: string }
               price: { type: number }
+
+    OrderItem:
+      type: object
+      properties:
+        productId: { type: integer }
+        qty: { type: integer }
+        unitPrice: { type: number }
+
+    Order:
+      type: object
+      properties:
+        id: { type: integer }
+        userId: { type: integer }
+        status:
+          type: string
+          enum: [pending_payment, paid, payment_failed, cancelled, fulfilled]
+        total: { type: number }
+        currency: { type: string, example: IDR }
+        version: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderItem" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    OrderEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/Order" }
+
+    OrderListEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Order" }
+
+    Payment:
+      type: object
+      properties:
+        id: { type: integer }
+        orderId: { type: integer }
+        idempotencyKey: { type: string }
+        status: { type: string }
+        amount: { type: number }
+        providerRef: { type: string }
+        attempt: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    PayResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            order: { $ref: "#/components/schemas/Order" }
+            payment: { $ref: "#/components/schemas/Payment" }
+
+    WishlistItem:
+      type: object
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        productName: { type: string }
+        price: { type: number }
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    WishlistEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { $ref: "#/components/schemas/WishlistItem" }
+
+    WishlistListEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/WishlistItem" }
+
+    WishlistCountEnvelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            count: { type: integer }
