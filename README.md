@@ -17,7 +17,7 @@ It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credibl
 
 Beyond infra, it also labs **commerce reliability** problems found in large systems: order state machine, inventory hold, payment choreography, transactional outbox, consumer inbox, stock ledger, and a live failure matrix.
 
-**Guides:** [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
+**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
@@ -148,28 +148,139 @@ Deep dive (ID): [`docs/belajar/09-commerce-reliability.md`](docs/belajar/09-comm
 
 | Mode | When to use | How |
 | ---- | ----------- | --- |
-| **A — Self-deploy** | Day-to-day lab, offline, fastest iteration | Build on the server → `k3s ctr images import` → `kubectl rollout` |
-| **B — GitLab CI/CD** | Clean releases, tags, portfolio “pipeline” story | Push → pipeline builds/scans → push images → optional **manual** deploy job |
+| **A — Self-deploy (lab)** | Day-to-day on one Ubuntu box | Compose = Kafka/Typesense; **k3s** = api + worker |
+| **B — GitLab CI/CD** | Clean releases / portfolio pipeline | Push → build/scan → registry → optional manual deploy |
 
-Both are first-class. Details: [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md).
+Both are first-class. Ops detail (ID): [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md) · GitLab: [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md).
 
-### Zero-downtime rollout (k3s)
+**Split that matters:** do **not** run api/worker in Compose when using k3s. Compose owns the data plane; k3s owns the app.
 
-API deployment uses `replicas: 2`, `maxUnavailable: 0`, readiness `/health/ready`, `preStop` drain, and graceful HTTP shutdown. New pods must be Ready before old pods terminate.
+---
+
+## Lab deploy (Mode A) — commands
+
+Run on the **server** (`~/projects/golang-be`). Default LAN IP below: `192.168.0.155` — ganti kalau beda.
+
+### One-time / first boot
 
 ```bash
-# Mode A (self-deploy on the Ubuntu box)
-docker build --target api -t golang-be-api:local .
-docker save golang-be-api:local -o /tmp/api.tar && sudo k3s ctr images import /tmp/api.tar
-# repeat for worker
-sudo k3s kubectl -n golang-be apply -f k8s/api-deployment.yaml
+# 1) shared data (Postgres / Redis / Mongo) — sudah di shared-net
+cd ~/projects/infra-db && docker compose up -d
+
+# 2) k3s
+curl -sfL https://get.k3s.io | sh -   # skip kalau sudah terpasang
+sudo systemctl enable --now k3s
+sudo k3s kubectl get nodes
+
+# 3) app repo + secrets (jangan commit secret.yaml / .env)
+cd ~/projects/golang-be
+git pull
+cp .env.example .env                  # sesuaikan bila perlu
+cp k8s/secret.example.yaml k8s/secret.yaml
+# isi API_KEY, JWT_SECRET, DB_USER/PASSWORD, TYPESENSE_API_KEY,
+# MONGO_URI=mongodb://admin:...@192.168.0.155:27017/?authSource=admin
+```
+
+### Setiap kali deploy / update kode
+
+Workflow: **edit lokal → commit → push → di server `git pull` → build & rollout** (jangan edit Go langsung di SSH).
+
+```bash
+cd ~/projects/golang-be
+git pull
+
+# shortcut (recommended)
+HOST_IP=192.168.0.155 ./scripts/deploy-k3s-lab.sh
+```
+
+Script itu menjalankan: Kafka+Typesense → build `golang-be-api:local` / `golang-be-worker:local` → `k3s ctr images import` → apply ConfigMap/Secret/manifests → rollout.
+
+Tanpa script (setara):
+
+```bash
+cd ~/projects/golang-be
+git pull
+
+# data plane only (bukan api/worker)
+KAFKA_HOST_ADVERTISE=192.168.0.155 docker compose up -d kafka typesense
+
+docker build --target api    -t golang-be-api:local .
+docker build --target worker -t golang-be-worker:local .
+docker save golang-be-api:local    -o /tmp/golang-be-api.tar
+docker save golang-be-worker:local -o /tmp/golang-be-worker.tar
+sudo k3s ctr images import /tmp/golang-be-api.tar
+sudo k3s ctr images import /tmp/golang-be-worker.tar
+
+sed "s/HOST_IP/$(hostname -I | awk '{print $1}')/g" k8s/configmap.yaml \
+  | sudo k3s kubectl apply -f -
+sudo k3s kubectl apply -f k8s/namespace.yaml -f k8s/secret.yaml \
+  -f k8s/api-deployment.yaml -f k8s/api-service.yaml \
+  -f k8s/api-hpa.yaml -f k8s/api-ingress.yaml \
+  -f k8s/worker-deployment.yaml
+
+sudo k3s kubectl -n golang-be rollout restart deploy/api deploy/worker
+sudo k3s kubectl -n golang-be rollout status deploy/api
+sudo k3s kubectl -n golang-be get pods,svc,ingress
+curl -s http://192.168.0.155/health/ready
+```
+
+API lewat Traefik ingress: `http://192.168.0.155/` (header `apikey` dari `k8s/secret.yaml`).
+
+### Restart app saja (tanpa rebuild)
+
+```bash
 sudo k3s kubectl -n golang-be rollout restart deploy/api deploy/worker
 sudo k3s kubectl -n golang-be rollout status deploy/api
 ```
 
+Zero-downtime: API `replicas: 2`, `maxUnavailable: 0`, readiness `/health/ready`, `preStop` drain.
+
 ---
 
-## Quick start
+## Teardown (down semua)
+
+### App k3s saja
+
+```bash
+sudo k3s kubectl delete namespace golang-be
+# atau selective:
+# sudo k3s kubectl -n golang-be delete deploy,svc,ingress,hpa,cm,secret --all
+```
+
+### Data plane golang-be (Kafka / Typesense)
+
+```bash
+cd ~/projects/golang-be
+docker compose down          # stop + hapus container
+# docker compose down -v   # + hapus volume (data Kafka/Typesense ikut hilang)
+```
+
+### Full lab wipe (app + data plane golang-be)
+
+```bash
+sudo k3s kubectl delete namespace golang-be
+cd ~/projects/golang-be && docker compose down -v
+```
+
+Postgres/Redis/Mongo di `~/projects/infra-db` **tidak** ikut mati (dipakai project lain). Matikan terpisah hanya kalau memang mau:
+
+```bash
+cd ~/projects/infra-db && docker compose down
+```
+
+### Cek bersih
+
+```bash
+sudo k3s kubectl get pods -A | grep golang || echo "no golang pods"
+docker ps | grep golang-be || echo "no golang-be compose"
+curl -s -o /dev/null -w "%{http_code}\n" http://192.168.0.155/health/ready   # expect fail/000
+```
+
+---
+
+## Quick start (local laptop — Compose only)
+
+Untuk develop di mesin lokal tanpa k3s: api+worker ikut Compose.
 
 ### 1. Configure
 
@@ -276,6 +387,7 @@ internal/
   metrics/                  shared Prometheus metrics
 
 migrations/                 000001…000007 (commerce + inbox composite PK)
+scripts/deploy-k3s-lab.sh   single-node: Compose data plane + k3s app
 scripts/load-orders.sh      concurrency / oversell demo
 k8s/ helm/                  deploy
 .gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
@@ -327,16 +439,15 @@ See [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md) and [`.gitlab-ci.yml`](.gitla
 
 The cluster runs only the **stateless app tier** (`api` + `worker`). Data services stay on Docker Compose on the same host.
 
+Day-to-day commands: see **[Lab deploy (Mode A)](#lab-deploy-mode-a--commands)** and **[Teardown](#teardown-down-semua)** above.
+
 Public / domain access later: [`docs/PUBLIC-ACCESS.md`](docs/PUBLIC-ACCESS.md).
 
 ```bash
-kubectl apply -f k8s/
-# or
+# Helm alternative (same split: app in cluster, data on Compose)
 helm install golang-be ./helm/golang-be -n golang-be --create-namespace \
   --set config.hostIP=192.168.0.155
 ```
-
-**Server workflow (recommended):** edit locally → `git commit` + `git push` → on the box `git pull` → rebuild images → `kubectl rollout`. Do not patch Go sources over SSH.
 
 ---
 
