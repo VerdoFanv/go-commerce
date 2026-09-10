@@ -27,10 +27,14 @@ INFRA_DB="${INFRA_DB:-$HOME/projects/infra-db}"
 SUDO() {
   if [[ "$(id -u)" -eq 0 ]]; then
     "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
+  elif [[ -n "${SUDO_PASS:-}" ]]; then
+    # Non-interactive lab boxes: SUDO_PASS='…' ./scripts/lab-restore.sh
+    printf '%s\n' "$SUDO_PASS" | sudo -S -p '' "$@"
+  elif sudo -n true 2>/dev/null; then
+    sudo -n "$@"
   else
-    "$@"
+    echo "WARN: need sudo for k3s (set SUDO_PASS or run as root); skipping: $*" >&2
+    return 1
   fi
 }
 
@@ -69,11 +73,13 @@ fi
 if [[ "$KEEP_RATE_LIMIT" != "1" ]] && command -v k3s >/dev/null 2>&1; then
   if SUDO k3s kubectl -n golang-be get cm golang-be-config >/dev/null 2>&1; then
     echo "==> RATE_LIMIT_MAX → 100 (set KEEP_RATE_LIMIT=1 to skip)"
-    SUDO k3s kubectl -n golang-be patch cm golang-be-config --type merge \
-      -p '{"data":{"RATE_LIMIT_MAX":"100","RATE_LIMIT_WINDOW":"1m"}}' >/dev/null
-    # Restart api so limiter reloads env from ConfigMap
-    SUDO k3s kubectl -n golang-be rollout restart deploy/api >/dev/null 2>&1 || true
-    SUDO k3s kubectl -n golang-be rollout status deploy/api --timeout=180s >/dev/null 2>&1 || true
+    if SUDO k3s kubectl -n golang-be patch cm golang-be-config --type merge \
+      -p '{"data":{"RATE_LIMIT_MAX":"100","RATE_LIMIT_WINDOW":"1m"}}'; then
+      SUDO k3s kubectl -n golang-be rollout restart deploy/api >/dev/null 2>&1 || true
+      SUDO k3s kubectl -n golang-be rollout status deploy/api --timeout=180s >/dev/null 2>&1 || true
+    else
+      echo "WARN: could not patch RATE_LIMIT_MAX — fix sudo or patch manually" >&2
+    fi
   fi
 fi
 
