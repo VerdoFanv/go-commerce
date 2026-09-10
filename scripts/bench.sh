@@ -49,6 +49,8 @@ run_k6() {
     -e BENCH_DURATION="${BENCH_DURATION:-}" \
     -e BENCH_STOCK="${BENCH_STOCK:-}" \
     -e BENCH_THINK="${BENCH_THINK:-}" \
+    -e BENCH_ORDER_P95="${BENCH_ORDER_P95:-}" \
+    -e BENCH_ORDER_P99="${BENCH_ORDER_P99:-}" \
     -e OVERSELL_STOCK="${OVERSELL_STOCK:-}" \
     -e OVERSELL_VUS="${OVERSELL_VUS:-}" \
     "$@" \

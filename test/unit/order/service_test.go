@@ -126,7 +126,7 @@ func itoa(v uint) string {
 }
 
 func TestCreate_RequiresIdempotencyKey(t *testing.T) {
-	svc := order.NewService(newFakeRepo(), testutil.Config())
+	svc := order.NewService(newFakeRepo(), testutil.Config(), nil)
 	_, _, _, err := svc.Create(context.Background(), order.CreateInput{
 		UserID: 1, Items: []order.CreateItemInput{{ProductID: 1, Qty: 1}},
 	})
@@ -135,7 +135,7 @@ func TestCreate_RequiresIdempotencyKey(t *testing.T) {
 
 func TestCreate_QueuesOutboxViaRepo(t *testing.T) {
 	repo := newFakeRepo()
-	svc := order.NewService(repo, testutil.Config())
+	svc := order.NewService(repo, testutil.Config(), nil)
 	o, status, body, err := svc.Create(context.Background(), order.CreateInput{
 		UserID: 1, IdempotencyKey: "k1",
 		Items: []order.CreateItemInput{{ProductID: 9, Qty: 2}},
@@ -151,7 +151,7 @@ func TestCreate_QueuesOutboxViaRepo(t *testing.T) {
 
 func TestCreate_ReplaysIdempotentResponse(t *testing.T) {
 	repo := newFakeRepo()
-	svc := order.NewService(repo, testutil.Config())
+	svc := order.NewService(repo, testutil.Config(), nil)
 	env := map[string]any{"success": true, "data": map[string]any{"id": 42}}
 	raw, _ := json.Marshal(env)
 	st := http.StatusCreated
@@ -184,7 +184,7 @@ func TestCreate_ReplaysIdempotentResponse(t *testing.T) {
 func TestPay_Timeout(t *testing.T) {
 	repo := newFakeRepo()
 	repo.created = &order.OrderModel{ID: 1, UserID: 1, Status: domain.OrderPendingPayment}
-	svc := order.NewService(repo, testutil.Config())
+	svc := order.NewService(repo, testutil.Config(), nil)
 	_, _, err := svc.Pay(context.Background(), order.PayInput{UserID: 1, OrderID: 1, Outcome: "timeout"})
 	require.ErrorIs(t, err, domain.ErrUnavailable)
 }

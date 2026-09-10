@@ -17,11 +17,17 @@ import (
 )
 
 type Handler struct {
-	db *gorm.DB
+	db    *gorm.DB
+	cache Cache // optional; nil skips product cache bust on release
 }
 
-func NewHandler(db *gorm.DB) *Handler {
-	return &Handler{db: db}
+// Cache invalidates product:{id} after stock is restored.
+type Cache interface {
+	Del(ctx context.Context, keys ...string) error
+}
+
+func NewHandler(db *gorm.DB, cache Cache) *Handler {
+	return &Handler{db: db, cache: cache}
 }
 
 // Handle applies inventory side effects for paid / cancelled / payment_failed.
@@ -38,7 +44,8 @@ func (h *Handler) Handle(ctx context.Context, msg kafka.Message) error {
 		return fmt.Errorf("%w: inventory event missing orderId", domain.ErrInvalid)
 	}
 
-	return h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var released []uint
+	err := h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		claimed, err := inbox.Claim(tx, "inventory", msg.Event.ID, msg.Event.Type)
 		if err != nil {
 			return err
@@ -50,11 +57,40 @@ func (h *Handler) Handle(ctx context.Context, msg kafka.Message) error {
 		case domain.EventOrderPaid, domain.EventOrderFulfilled:
 			return commitTX(tx, orderID)
 		case domain.EventOrderCancelled, domain.EventOrderPaymentFailed:
-			return releaseTX(tx, orderID)
+			ids, err := releaseTX(tx, orderID)
+			if err != nil {
+				return err
+			}
+			released = append(released, ids...)
+			return nil
 		default:
 			return nil
 		}
 	})
+	if err != nil {
+		return err
+	}
+	h.bustProductCache(ctx, released...)
+	return nil
+}
+
+func (h *Handler) bustProductCache(ctx context.Context, ids ...uint) {
+	if h.cache == nil || len(ids) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		keys = append(keys, fmt.Sprintf("product:%d", id))
+	}
+	if len(keys) == 0 {
+		return
+	}
+	if err := h.cache.Del(ctx, keys...); err != nil {
+		slog.Warn("product cache invalidate failed", "err", err, "keys", keys)
+	}
 }
 
 func commitTX(tx *gorm.DB, orderID uint) error {
@@ -87,7 +123,7 @@ func commitTX(tx *gorm.DB, orderID uint) error {
 	return nil
 }
 
-func releaseTX(tx *gorm.DB, orderID uint) error {
+func releaseTX(tx *gorm.DB, orderID uint) ([]uint, error) {
 	type resv struct {
 		ID        uint
 		ProductID uint
@@ -99,27 +135,29 @@ func releaseTX(tx *gorm.DB, orderID uint) error {
 		Select("id, product_id, qty").
 		Where("order_id = ? AND status = ?", orderID, domain.ReservationHeld).
 		Find(&rows).Error; err != nil {
-		return err
+		return nil, err
 	}
 	now := time.Now().UTC()
+	ids := make([]uint, 0, len(rows))
 	for _, row := range rows {
 		if err := tx.Exec(`UPDATE products SET stock = stock + ?, updated_at = now() WHERE id = ?`, row.Qty, row.ProductID).Error; err != nil {
-			return err
+			return nil, err
 		}
 		var bal int
 		if err := tx.Table("products").Select("stock").Where("id = ?", row.ProductID).Scan(&bal).Error; err != nil {
-			return err
+			return nil, err
 		}
 		oid := orderID
 		if err := ledger.Append(tx, row.ProductID, &oid, row.Qty, ledger.ReasonRelease, &bal); err != nil {
-			return err
+			return nil, err
 		}
 		if err := tx.Table("inventory_reservations").Where("id = ?", row.ID).
 			Updates(map[string]any{"status": domain.ReservationReleased, "updated_at": now}).Error; err != nil {
-			return err
+			return nil, err
 		}
+		ids = append(ids, row.ProductID)
 	}
-	return nil
+	return ids, nil
 }
 
 func asUint(v any) (uint, bool) {

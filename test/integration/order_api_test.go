@@ -159,7 +159,7 @@ func setupOrderAPI() (*gin.Engine, string) {
 	cfg := testutil.Config()
 	authRepo := mocks.NewAuthRepository()
 	authHandler := auth.NewHandler(auth.NewService(authRepo, cfg, nil))
-	orderHandler := order.NewHandler(order.NewService(newOrderRepoStub(), testutil.Config()))
+	orderHandler := order.NewHandler(order.NewService(newOrderRepoStub(), testutil.Config(), nil))
 
 	app := testutil.NewRouter()
 	api := app.Group("/api/v1", middleware.APIKey(cfg.APIKey))

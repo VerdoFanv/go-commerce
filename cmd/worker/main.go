@@ -17,6 +17,7 @@ import (
 	"github.com/verdofanv/golang-be/internal/platform/kafka"
 	"github.com/verdofanv/golang-be/internal/platform/mongo"
 	"github.com/verdofanv/golang-be/internal/platform/outbox"
+	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/worker/dispatch"
 	"github.com/verdofanv/golang-be/internal/worker/inventory"
@@ -32,12 +33,15 @@ func main() {
 		fx.Provide(config.Load),
 
 		fx.Provide(database.Connect),
+		fx.Provide(appredis.Connect),
 		fx.Provide(mongo.Connect),
 		fx.Provide(audit.NewMongoStore),
 		fx.Provide(func(s *audit.MongoStore) audit.Store { return s }),
 		fx.Provide(outbox.NewWriter),
 		fx.Provide(payment.NewHandler),
-		fx.Provide(inventory.NewHandler),
+		fx.Provide(func(db *gorm.DB, cache *appredis.Client) *inventory.Handler {
+			return inventory.NewHandler(db, cache)
+		}),
 
 		fx.Provide(func(cfg config.Config) *kafka.Consumer {
 			return kafka.NewConsumer(cfg, cfg.KafkaTopicProducts, cfg.KafkaGroupWorker)

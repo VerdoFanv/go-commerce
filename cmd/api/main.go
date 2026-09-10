@@ -89,6 +89,7 @@ func main() {
 		fx.Provide(wishlist.NewHandler),
 
 		fx.Provide(order.NewRepository),
+		fx.Provide(func(ps *product.Service) order.ProductCache { return ps }),
 		fx.Provide(order.NewService),
 		fx.Provide(order.NewHandler),
 

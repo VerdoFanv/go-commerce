@@ -14,13 +14,19 @@ import (
 	"github.com/verdofanv/golang-be/internal/domain"
 )
 
-type Service struct {
-	repo Repository
-	cfg  config.Config
+// ProductCache drops Redis product:{id} entries when order flows mutate stock.
+type ProductCache interface {
+	InvalidateProducts(ctx context.Context, ids ...uint) error
 }
 
-func NewService(repo Repository, cfg config.Config) *Service {
-	return &Service{repo: repo, cfg: cfg}
+type Service struct {
+	repo  Repository
+	cfg   config.Config
+	cache ProductCache // optional; nil in tests
+}
+
+func NewService(repo Repository, cfg config.Config, cache ProductCache) *Service {
+	return &Service{repo: repo, cfg: cfg, cache: cache}
 }
 
 type CreateInput struct {
@@ -70,6 +76,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Order, in
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	s.invalidateProductIDs(ctx, createItemProductIDs(items)...)
 	order, err := s.Get(ctx, in.UserID, model.ID)
 	if err != nil {
 		return nil, 0, nil, err
@@ -102,10 +109,12 @@ func (s *Service) List(ctx context.Context, userID uint, limit int) ([]domain.Or
 }
 
 func (s *Service) Cancel(ctx context.Context, userID, id uint) (*domain.Order, error) {
+	_, items, _ := s.repo.FindByID(ctx, userID, id)
 	model, err := s.repo.Cancel(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateProductIDs(ctx, itemProductIDs(items)...)
 	return s.Get(ctx, userID, model.ID)
 }
 
@@ -160,10 +169,12 @@ func (s *Service) ExpireStaleHolds(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, id := range ids {
+		_, items, _ := s.repo.FindByIDAny(ctx, id)
 		if _, err := s.repo.CancelSystem(ctx, id); err != nil {
 			slog.Warn("hold expiry cancel failed", "orderId", id, "err", err)
 			continue
 		}
+		s.invalidateProductIDs(ctx, itemProductIDs(items)...)
 		n++
 	}
 	return n, nil
@@ -194,6 +205,31 @@ func hashCreateRequest(items []CreateItemInput) string {
 	b, _ := json.Marshal(items)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+func (s *Service) invalidateProductIDs(ctx context.Context, ids ...uint) {
+	if s.cache == nil || len(ids) == 0 {
+		return
+	}
+	if err := s.cache.InvalidateProducts(ctx, ids...); err != nil {
+		slog.Warn("product cache invalidate failed", "err", err, "ids", ids)
+	}
+}
+
+func createItemProductIDs(items []CreateItem) []uint {
+	out := make([]uint, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.ProductID)
+	}
+	return out
+}
+
+func itemProductIDs(items []OrderItemModel) []uint {
+	out := make([]uint, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.ProductID)
+	}
+	return out
 }
 
 func toDomain(m *OrderModel, items []OrderItemModel) *domain.Order {

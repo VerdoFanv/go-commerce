@@ -340,6 +340,26 @@ func (s *Service) deleteCache(ctx context.Context, id uint) error {
 	return s.cache.Del(ctx, productCacheKey(id))
 }
 
+// InvalidateProducts drops per-id product cache entries after stock mutates outside
+// this service (order hold/release). Without this, GET /products/:id can serve
+// stale stock for ProductCacheTTL and hide oversell/teardown truth.
+func (s *Service) InvalidateProducts(ctx context.Context, ids ...uint) error {
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if err := s.deleteCache(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ProductCacheKey is shared with workers that mutate stock outside the product service.
+func ProductCacheKey(id uint) string {
+	return productCacheKey(id)
+}
+
 func (s *Service) invalidateListCache(ctx context.Context, userID uint) error {
 	if s.cache == nil {
 		return nil

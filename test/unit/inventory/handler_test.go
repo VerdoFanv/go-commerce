@@ -11,7 +11,7 @@ import (
 )
 
 func TestHandle_MissingOrderID(t *testing.T) {
-	h := inventory.NewHandler(nil)
+	h := inventory.NewHandler(nil, nil)
 	err := h.Handle(context.Background(), kafka.Message{
 		Event: kafka.NewEvent(domain.EventOrderPaid, map[string]any{}),
 	})
@@ -19,7 +19,7 @@ func TestHandle_MissingOrderID(t *testing.T) {
 }
 
 func TestHandle_UnknownTypeNoop(t *testing.T) {
-	h := inventory.NewHandler(nil)
+	h := inventory.NewHandler(nil, nil)
 	err := h.Handle(context.Background(), kafka.Message{
 		Event: kafka.NewEvent("product.created", map[string]any{"orderId": float64(1)}),
 	})
