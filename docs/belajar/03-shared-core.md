@@ -42,14 +42,14 @@ Tidak ada dependency ke Gin/GORM/Kafka. Layer luar yang bergantung ke sini, buka
 
 | Symbol | Fungsi |
 |--------|--------|
-| `Config` | Semua knob: DB, Redis, Kafka, Mongo, Typesense, JWT, rate limit, timeout, metrics port |
+| `Config` | Semua knob: DB, Redis, Kafka, Mongo, Typesense, JWT, rate limit, timeout, metrics, **CORS_ORIGINS**, **ENABLE_HSTS**, **ORDER_HOLD_TTL** |
 | `Load()` | Baca env + default → `Validate()` → panik kalau invalid (fail-fast boot) |
 | `Validate()` | Struct tags `go-playground/validator` |
 | `PostgresDSN()` | String koneksi GORM/pg |
 | `IsProduction()` | `APP_ENV == production` |
 | `env` / `envInt` / `envBool` / `envDuration` / `envList` | Helper parse env |
 
-Produksi: `Load` menolak `API_KEY` / `JWT_SECRET` default.
+Produksi: `Load` menolak `API_KEY` / `JWT_SECRET` default, menolak `CORS_ORIGINS=*`, dan naikkan `BCRYPT_COST` minimal 12.
 
 **Jangan** hardcode credential di kode feature — selalu lewat `config.Config`.
 
@@ -103,6 +103,7 @@ Semua handler HTTP harus lewat package ini — jangan tulis JSON ad-hoc.
 | `000004_wishlists` | Tabel wishlist + seed |
 | `000005_commerce` | orders, items, reservations, payments, idempotency_keys, outbox_events |
 | `000006_inbox_ledger` | `processed_events` (inbox) + `stock_ledger` |
+| `000007_inbox_composite` | PK inbox = `(event_id, consumer)` — multi-handler aman |
 | `migrations.go` | Embed SQL + runner (`database.Migrate`) |
 
 Hanya **API** yang migrate saat OnStart. Worker memakai schema yang sama, tidak mengubahnya.

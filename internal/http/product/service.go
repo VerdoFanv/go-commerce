@@ -148,6 +148,34 @@ func (s *Service) List(ctx context.Context, userID, cursor uint, limit int) (*Li
 	return result, nil
 }
 
+// Catalog lists the public marketplace catalog (all sellers), cursor-paginated.
+func (s *Service) Catalog(ctx context.Context, cursor uint, limit int) (*ListResult, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	models, err := s.repo.ListCatalogCursor(ctx, cursor, limit+1)
+	if err != nil {
+		return nil, err
+	}
+
+	hasMore := len(models) > limit
+	if hasMore {
+		models = models[:limit]
+	}
+
+	items := make([]domain.Product, 0, len(models))
+	for i := range models {
+		items = append(items, toDomain(&models[i]))
+	}
+
+	result := &ListResult{Items: items, HasMore: hasMore}
+	if hasMore && len(items) > 0 {
+		result.NextCursor = items[len(items)-1].ID
+	}
+	return result, nil
+}
+
 func (s *Service) Update(ctx context.Context, userID, id uint, in UpdateInput) (*domain.Product, error) {
 	model, err := s.repo.FindByID(ctx, id)
 	if err != nil {

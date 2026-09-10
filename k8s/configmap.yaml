@@ -8,7 +8,7 @@ data:
   # Kafka, MongoDB, and Typesense stay on Docker Compose on the SAME host —
   # replace HOST_IP with that host's LAN IP (`hostname -I | awk '{print $1}'`).
   # Pods reach host-published ports via the real interface, not 127.0.0.1.
-  APP_ENV: "production"
+  APP_ENV: "staging"
   APP_PORT: "8080"
   LOG_LEVEL: "info"
   DB_HOST: "HOST_IP"
@@ -33,3 +33,8 @@ data:
   REQUEST_TIMEOUT: "10s"
   SHUTDOWN_TIMEOUT: "15s"
   METRICS_PORT: "2112"
+  # Lab host: staging keeps /lab + /docs. Use production only when exposing publicly.
+  CORS_ORIGINS: "*"
+  ENABLE_HSTS: "false"
+  ORDER_HOLD_TTL: "15m"
+  BCRYPT_COST: "12"

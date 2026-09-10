@@ -57,6 +57,14 @@ type Config struct {
 	RequestTimeout  time.Duration
 	ShutdownTimeout time.Duration
 
+	// CORSOrigins is a comma-separated allowlist. Empty → ["*"] in non-prod only.
+	CORSOrigins []string
+	// EnableHSTS sets Strict-Transport-Security (only when TLS is terminated in front).
+	EnableHSTS bool
+
+	// OrderHoldTTL is how long unpaid pending_payment orders keep stock reserved.
+	OrderHoldTTL time.Duration
+
 	// MetricsPort is where the worker exposes /metrics (the API exposes it on AppPort).
 	MetricsPort string `validate:"required,numeric"`
 }
@@ -117,6 +125,9 @@ func Load() Config {
 
 		RequestTimeout:  envDuration("REQUEST_TIMEOUT", 10*time.Second),
 		ShutdownTimeout: envDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
+		CORSOrigins:     envList("CORS_ORIGINS", "*"),
+		EnableHSTS:      envBool("ENABLE_HSTS", false),
+		OrderHoldTTL:    envDuration("ORDER_HOLD_TTL", 15*time.Minute),
 		MetricsPort:     env("METRICS_PORT", "2112"),
 	}
 
@@ -129,6 +140,14 @@ func Load() Config {
 		}
 		if len(cfg.JWTSecret) < 16 || cfg.JWTSecret == "dev-secret-change-me" {
 			panic("invalid configuration: production requires a real JWT_SECRET (min 16) from env/secret")
+		}
+		for _, o := range cfg.CORSOrigins {
+			if o == "*" {
+				panic("invalid configuration: production forbids CORS_ORIGINS=* — set an explicit allowlist")
+			}
+		}
+		if cfg.BcryptCost < 12 {
+			cfg.BcryptCost = 12
 		}
 	}
 	return cfg

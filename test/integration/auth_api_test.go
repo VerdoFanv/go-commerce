@@ -15,7 +15,7 @@ import (
 func setupAuthAPI() (*gin.Engine, *mocks.AuthRepository) {
 	cfg := testutil.Config()
 	repo := mocks.NewAuthRepository()
-	svc := auth.NewService(repo, cfg)
+	svc := auth.NewService(repo, cfg, nil)
 	h := auth.NewHandler(svc)
 
 	app := testutil.NewRouter()
@@ -29,13 +29,13 @@ func TestAuthAPI_RegisterLoginMe(t *testing.T) {
 	cfg := testutil.Config()
 
 	status, body := testutil.DoJSON(t, app, "POST", "/api/v1/authentication/register", map[string]any{
-		"name": "Andi", "email": "andi@example.com", "password": "secret1",
+		"name": "Andi", "email": "andi@example.com", "password": "secret12",
 	}, testutil.WithAPIKey(cfg.APIKey))
 	require.Equal(t, 201, status)
 	require.Equal(t, true, body["success"])
 
 	status, body = testutil.DoJSON(t, app, "POST", "/api/v1/authentication/login", map[string]any{
-		"email": "andi@example.com", "password": "secret1",
+		"email": "andi@example.com", "password": "secret12",
 	}, testutil.WithAPIKey(cfg.APIKey))
 	require.Equal(t, 200, status)
 
@@ -68,7 +68,7 @@ func TestAuthAPI_RequiresAPIKey(t *testing.T) {
 	app, _ := setupAuthAPI()
 
 	status, body := testutil.DoJSON(t, app, "POST", "/api/v1/authentication/login", map[string]any{
-		"email": "a@b.com", "password": "secret1",
+		"email": "a@b.com", "password": "secret12",
 	})
 	require.Equal(t, 401, status)
 	require.Equal(t, domain.ErrInvalidAPIKey.Error(), body["message"])
@@ -79,7 +79,7 @@ func TestAuthAPI_RefreshToken(t *testing.T) {
 	cfg := testutil.Config()
 
 	_, body := testutil.DoJSON(t, app, "POST", "/api/v1/authentication/register", map[string]any{
-		"name": "Andi", "email": "andi@example.com", "password": "secret1",
+		"name": "Andi", "email": "andi@example.com", "password": "secret12",
 	}, testutil.WithAPIKey(cfg.APIKey))
 
 	data := testutil.DecodeData[map[string]any](t, body)

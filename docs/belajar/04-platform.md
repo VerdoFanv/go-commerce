@@ -82,7 +82,7 @@ Ini jawaban untuk **dual-write problem**: jangan `INSERT order` lalu `Publish` t
 
 | Symbol | Fungsi |
 |--------|--------|
-| `Claim(tx, consumer, eventID, type)` | Insert `processed_events`; `false` = sudah pernah |
+| `Claim(tx, consumer, eventID, type)` | Insert `processed_events` keyed by **`(event_id, consumer)`**; `false` = sudah pernah |
 | Dipakai | `worker/payment`, `worker/inventory` |
 
 Pasangan natural outbox: broker at-least-once → side effect sekali per consumer.

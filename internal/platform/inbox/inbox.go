@@ -12,14 +12,18 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// Row is keyed by (event_id, consumer) so payment and inventory can both claim
+// the same Kafka event without blocking each other.
 type Row struct {
 	EventID     string    `gorm:"column:event_id;primaryKey"`
-	Consumer    string    `gorm:"column:consumer;size:64"`
+	Consumer    string    `gorm:"column:consumer;primaryKey;size:64"`
 	EventType   string    `gorm:"column:event_type;size:64"`
 	ProcessedAt time.Time `gorm:"column:processed_at"`
 }
 
 func (Row) TableName() string { return "processed_events" }
+
+var conflictCols = []clause.Column{{Name: "event_id"}, {Name: "consumer"}}
 
 // AlreadyProcessed reports whether this consumer already handled eventID.
 func AlreadyProcessed(ctx context.Context, db *gorm.DB, consumer, eventID string) (bool, error) {
@@ -38,8 +42,9 @@ func MarkProcessed(ctx context.Context, db *gorm.DB, consumer, eventID, eventTyp
 		EventType:   eventType,
 		ProcessedAt: time.Now().UTC(),
 	}
-	err := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
-	return err
+	return db.WithContext(ctx).
+		Clauses(clause.OnConflict{Columns: conflictCols, DoNothing: true}).
+		Create(&row).Error
 }
 
 // Claim inserts inside an open transaction. Returns false if already claimed.
@@ -50,7 +55,7 @@ func Claim(tx *gorm.DB, consumer, eventID, eventType string) (bool, error) {
 		EventType:   eventType,
 		ProcessedAt: time.Now().UTC(),
 	}
-	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	res := tx.Clauses(clause.OnConflict{Columns: conflictCols, DoNothing: true}).Create(&row)
 	if res.Error != nil {
 		return false, res.Error
 	}

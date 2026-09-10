@@ -52,7 +52,7 @@ func TestRateLimit_NilLimiterPassesThrough(t *testing.T) {
 
 func TestSecurityHeaders_Set(t *testing.T) {
 	app := testutil.NewRouter()
-	app.Use(middleware.SecurityHeaders())
+	app.Use(middleware.SecurityHeaders(false))
 	app.GET("/x", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)

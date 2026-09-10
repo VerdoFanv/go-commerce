@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,11 +21,18 @@ func APIKey(expected string) gin.HandlerFunc {
 		if key == "" {
 			key = c.GetHeader("X-API-Key")
 		}
-		if key != expected {
+		if !constantTimeEqual(key, expected) {
 			response.FailCode(c, http.StatusUnauthorized, domain.ErrInvalidAPIKey.Error(), domain.ErrorCode(domain.ErrInvalidAPIKey))
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func constantTimeEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

@@ -119,6 +119,7 @@ func registerLifecycle(
 	cfg config.Config,
 	httpServer *http.Server,
 	_ *gin.Engine, // ensure engine is constructed
+	orderSvc *order.Service,
 	db *gorm.DB,
 	rdb *appredis.Client,
 	mdb *mongo.Client,
@@ -130,6 +131,7 @@ func registerLifecycle(
 ) {
 	notifierCtx, stopNotifier := context.WithCancel(context.Background())
 	relayCtx, stopRelay := context.WithCancel(context.Background())
+	holdCtx, stopHold := context.WithCancel(context.Background())
 
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
@@ -143,6 +145,7 @@ func registerLifecycle(
 
 			go notifier.Run(notifierCtx)
 			go relay.Run(relayCtx)
+			go orderSvc.RunHoldExpiry(holdCtx)
 
 			go func() {
 				slog.Info("api listening", "addr", httpServer.Addr, "env", cfg.AppEnv)
@@ -156,6 +159,7 @@ func registerLifecycle(
 			slog.Info("shutting down api")
 			stopNotifier()
 			stopRelay()
+			stopHold()
 
 			if err := httpServer.Shutdown(ctx); err != nil {
 				slog.Warn("http shutdown", "err", err)

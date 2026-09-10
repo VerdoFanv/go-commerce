@@ -12,9 +12,10 @@ Prefix REST: `/api/v1` (+ header `apikey`).
 
 | Method | Path | JWT | Handler |
 |--------|------|-----|---------|
-| POST | `/authentication/register` | tidak | `register` |
+| POST | `/authentication/register` | tidak | `register` (password **min 8**) |
 | POST | `/authentication/login` | tidak | `login` |
-| POST | `/authentication/refresh-token` | tidak (body refresh) | `refresh` |
+| POST | `/authentication/refresh-token` | tidak (body refresh) | `refresh` — **rotasi** (jti Redis) |
+| POST | `/authentication/logout` | tidak (body refresh) | `logout` — revoke jti |
 | GET | `/authentication/me` | ya | `me` |
 
 ### Layer
@@ -23,18 +24,19 @@ Prefix REST: `/api/v1` (+ header `apikey`).
 |------|-------------|
 | `model.go` | `UserModel` → tabel `users` |
 | `repository.go` | `Create`, `FindByEmail`, `FindByID` (+ unique email) |
-| `service.go` | bcrypt hash, issue access/refresh JWT, map ke `domain.User` |
+| `service.go` | bcrypt, issue tokens, store/consume refresh `jti` di Redis |
 | `handler.go` | Bind JSON, `mapErr` → status |
 
 ### Service functions
 
 | Fungsi | Apa yang dilakukan |
 |--------|-------------------|
-| `Register` | Validasi → hash password → insert → tokens |
+| `Register` | Validasi (≥8) → hash → insert → tokens |
 | `Login` | Cari email → compare bcrypt → tokens |
-| `Refresh` | Parse refresh JWT → issue pasangan token baru |
+| `Refresh` | Parse refresh (HMAC + type) → **hapus jti lama** → issue pasangan baru |
+| `Logout` | Hapus jti refresh dari Redis |
 | `Me` | Load user by id dari access token |
-| `issueTokens` | Access TTL pendek + refresh TTL panjang |
+| `issueTokens` | Access TTL pendek + refresh TTL panjang + `jti` |
 
 ---
 
@@ -46,7 +48,8 @@ Ini fitur “paling lengkap”: Postgres + Redis cache + Kafka publish + Typesen
 
 | Method | Path | Handler |
 |--------|------|---------|
-| GET | `/products` | `list` (cursor pagination) |
+| GET | `/products` | `list` (milik seller / user sendiri, cursor) |
+| GET | `/products/catalog` | `catalog` (**buyer browse** semua seller) |
 | GET | `/products/search` | `search` (Typesense) — **sebelum** `/:id` |
 | POST | `/products` | `create` |
 | GET | `/products/:id` | `getByID` |
@@ -67,6 +70,7 @@ Ini fitur “paling lengkap”: Postgres + Redis cache + Kafka publish + Typesen
 | `Create` | insert | invalidate list | `product.created` async | index async |
 | `GetByID` | miss → DB | get/set `product:{id}` | — | — |
 | `List` | cursor query | cache first page | — | — |
+| `Catalog` | semua seller, cursor | — | — | — |
 | `Update` | update owner | invalidate | `product.updated` | reindex |
 | `Delete` | delete + RBAC | invalidate | `product.deleted` | delete doc |
 | `Search` | — | — | — | query |
@@ -111,8 +115,8 @@ Ini jalur **reliability**: transactional outbox + stock hold + idempotency. Deta
 | GET | `/orders` | List milik user |
 | GET | `/orders/:id` | Detail + items |
 | POST | `/orders/:id/cancel` | State machine + release stock + outbox |
-| POST | `/orders/:id/pay` | Simulator `outcome=success\|fail\|timeout` |
-| POST | `/orders/:id/fulfill` | `paid` → `fulfilled` + outbox |
+| POST | `/orders/:id/pay` | Lab override simulator (`success\|fail\|timeout`); **canonical charge = worker** |
+| POST | `/orders/:id/fulfill` | **admin only** — `paid` → `fulfilled` + outbox |
 
 ### Create (inti)
 
@@ -138,7 +142,10 @@ Satu TX Postgres:
 
 ## Lab — `internal/http/lab/`
 
-Endpoint **belajar infra + reliability**, tetap butuh JWT + apikey.
+Endpoint **belajar infra + reliability**.
+
+- **Non-production only** — tidak di-register saat `APP_ENV=production`.
+- Middleware: JWT + **`RequireRole(admin)`**.
 
 | Method | Path | Fungsi service |
 |--------|------|----------------|
@@ -167,9 +174,9 @@ Bukan CRUD; real-time fan-out.
 | `Hub` | Set koneksi WS; `Add`/`Remove`/`Broadcast`/`Count` |
 | `Notifier.Run` | Loop `Fetch` Kafka (group notifier) → `Hub.Broadcast` → `Commit` |
 | `Handler.products` | Upgrade HTTP → WebSocket `/ws/products` |
-| `Handler.authenticate` | Validasi JWT sebelum upgrade |
+| `Handler.authenticate` | `apikey` + access JWT (`ParseAccessToken`); origin mengikuti `CORS_ORIGINS` |
 
-Client: connect dengan token → create/update product di terminal lain → event muncul di WS.
+Client: `ws://host/ws/products?token=<access>&apikey=<key>` → create/update product → event muncul di WS.
 
 ---
 

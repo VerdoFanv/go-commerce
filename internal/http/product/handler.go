@@ -24,7 +24,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
 	products.Use(middleware.Auth(jwtSecret))
 	{
 		products.GET("", h.list)
-		products.GET("/search", h.search) // before /:id so "search" never parses as an ID
+		products.GET("/catalog", h.catalog) // buyer browse — before /:id
+		products.GET("/search", h.search)   // before /:id so "search" never parses as an ID
 		products.POST("", h.create)
 		products.GET("/:id", h.getByID)
 		products.PUT("/:id", h.update)
@@ -88,6 +89,27 @@ func (h *Handler) list(c *gin.Context) {
 	limit := queryInt(c, "limit", 20)
 
 	result, err := h.svc.List(c.Request.Context(), userID, cursor, limit)
+	if err != nil {
+		mapErr(c, err)
+		return
+	}
+	response.OKWithMeta(c, "success", result.Items, response.PageMeta{
+		Limit:      limit,
+		NextCursor: result.NextCursor,
+		HasMore:    result.HasMore,
+	})
+}
+
+// catalog is the buyer-facing marketplace browse (all sellers' products).
+func (h *Handler) catalog(c *gin.Context) {
+	cursor, err := parseCursor(c.Query("cursor"))
+	if err != nil {
+		response.FailCode(c, http.StatusBadRequest, "invalid cursor", domain.ErrorCode(domain.ErrInvalid))
+		return
+	}
+	limit := queryInt(c, "limit", 20)
+
+	result, err := h.svc.Catalog(c.Request.Context(), cursor, limit)
 	if err != nil {
 		mapErr(c, err)
 		return

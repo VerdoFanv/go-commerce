@@ -55,6 +55,14 @@ func (r *orderRepoStub) FindByID(_ context.Context, userID, id uint) (*order.Ord
 	return m, r.items[id], nil
 }
 
+func (r *orderRepoStub) FindByIDAny(_ context.Context, id uint) (*order.OrderModel, []order.OrderItemModel, error) {
+	m, ok := r.orders[id]
+	if !ok {
+		return nil, nil, domain.ErrNotFound
+	}
+	return m, r.items[id], nil
+}
+
 func (r *orderRepoStub) ListByUser(_ context.Context, userID uint, _ int) ([]order.OrderModel, error) {
 	var out []order.OrderModel
 	for _, m := range r.orders {
@@ -76,6 +84,23 @@ func (r *orderRepoStub) Cancel(_ context.Context, userID, id uint) (*order.Order
 	}
 	m.Status = next
 	return m, nil
+}
+
+func (r *orderRepoStub) CancelSystem(_ context.Context, id uint) (*order.OrderModel, error) {
+	m, ok := r.orders[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	next, err := domain.Transition(m.Status, domain.OrderCancelled)
+	if err != nil {
+		return nil, err
+	}
+	m.Status = next
+	return m, nil
+}
+
+func (r *orderRepoStub) ListExpiredPendingIDs(_ context.Context, _ time.Time, _ int) ([]uint, error) {
+	return nil, nil
 }
 
 func (r *orderRepoStub) Pay(_ context.Context, userID, id uint, outcome, _ string) (*order.OrderModel, *order.PaymentModel, error) {
@@ -104,9 +129,9 @@ func (r *orderRepoStub) Pay(_ context.Context, userID, id uint, outcome, _ strin
 	return m, pay, nil
 }
 
-func (r *orderRepoStub) Fulfill(_ context.Context, userID, id uint) (*order.OrderModel, error) {
+func (r *orderRepoStub) Fulfill(_ context.Context, id uint) (*order.OrderModel, error) {
 	m, ok := r.orders[id]
-	if !ok || m.UserID != userID {
+	if !ok {
 		return nil, domain.ErrNotFound
 	}
 	next, err := domain.Transition(m.Status, domain.OrderFulfilled)
@@ -133,8 +158,8 @@ func (r *orderRepoStub) SaveIdempotencyResponse(_ context.Context, userID uint, 
 func setupOrderAPI() (*gin.Engine, string) {
 	cfg := testutil.Config()
 	authRepo := mocks.NewAuthRepository()
-	authHandler := auth.NewHandler(auth.NewService(authRepo, cfg))
-	orderHandler := order.NewHandler(order.NewService(newOrderRepoStub()))
+	authHandler := auth.NewHandler(auth.NewService(authRepo, cfg, nil))
+	orderHandler := order.NewHandler(order.NewService(newOrderRepoStub(), testutil.Config()))
 
 	app := testutil.NewRouter()
 	api := app.Group("/api/v1", middleware.APIKey(cfg.APIKey))

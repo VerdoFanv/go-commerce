@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,13 @@ func RateLimit(limiter RateLimiter, max int, window time.Duration) gin.HandlerFu
 	return func(c *gin.Context) {
 		res, err := limiter.Allow(c.Request.Context(), "rl:"+c.ClientIP(), limit)
 		if err != nil {
+			// Fail closed on auth routes so Redis outages cannot open credential stuffing.
+			if strings.Contains(c.FullPath(), "/authentication/") || strings.Contains(c.Request.URL.Path, "/authentication/") {
+				response.FailCode(c, http.StatusServiceUnavailable,
+					domain.ErrUnavailable.Error(), domain.ErrorCode(domain.ErrUnavailable))
+				c.Abort()
+				return
+			}
 			c.Next()
 			return
 		}

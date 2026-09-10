@@ -9,17 +9,17 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/verdofanv/golang-be/internal/http/auth"
 	"github.com/verdofanv/golang-be/internal/config"
+	"github.com/verdofanv/golang-be/internal/http/auth"
 	"github.com/verdofanv/golang-be/internal/http/health"
 	"github.com/verdofanv/golang-be/internal/http/lab"
-	"github.com/verdofanv/golang-be/internal/metrics"
 	"github.com/verdofanv/golang-be/internal/http/middleware"
 	"github.com/verdofanv/golang-be/internal/http/notify"
 	"github.com/verdofanv/golang-be/internal/http/order"
-	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/http/product"
 	"github.com/verdofanv/golang-be/internal/http/wishlist"
+	"github.com/verdofanv/golang-be/internal/metrics"
+	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 )
 
 // NewEngine builds the fully-middlewared Gin engine.
@@ -43,9 +43,9 @@ func NewEngine(
 	engine.Use(middleware.RequestID())
 	engine.Use(middleware.Tracing("golang-be-api"))
 	engine.Use(metrics.Middleware())
-	engine.Use(middleware.SecurityHeaders())
+	engine.Use(middleware.SecurityHeaders(cfg.EnableHSTS))
 	engine.Use(cors.New(cors.Config{
-		AllowOrigins: []string{"*"},
+		AllowOrigins: cfg.CORSOrigins,
 		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization", "apikey", "X-API-Key", "Idempotency-Key"},
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 	}))
@@ -69,6 +69,8 @@ func NewEngine(
 			dbg.GET("/heap", gin.WrapH(pprof.Handler("heap")))
 			dbg.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
 		}
+		// OpenAPI surface is dev/staging only — avoid exposing schema on public prod ingress.
+		engine.Static("/docs", "./docs")
 	}
 
 	var limiter middleware.RateLimiter
@@ -83,12 +85,10 @@ func NewEngine(
 	productH.RegisterRoutes(api, cfg.JWTSecret)
 	wishlistH.RegisterRoutes(api, cfg.JWTSecret)
 	orderH.RegisterRoutes(api, cfg.JWTSecret)
-	labH.RegisterRoutes(api, cfg.JWTSecret)
+	// Chaos / ops lab is disabled in production and admin-gated otherwise.
+	labH.RegisterRoutes(api, cfg.JWTSecret, !cfg.IsProduction())
 
 	notifyH.RegisterRoutes(engine)
-
-	// Static docs (Swagger UI). Avoid registering GET /docs/ — conflicts with Static wildcard.
-	engine.Static("/docs", "./docs")
 
 	return engine
 }

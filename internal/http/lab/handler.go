@@ -19,9 +19,12 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string, enabled bool) {
+	if !enabled {
+		return
+	}
 	lab := rg.Group("/lab")
-	lab.Use(middleware.Auth(jwtSecret))
+	lab.Use(middleware.Auth(jwtSecret), middleware.RequireRole(domain.RoleAdmin))
 	{
 		lab.GET("/overview", h.overview)
 

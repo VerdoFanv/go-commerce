@@ -3,23 +3,29 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/http/middleware"
+	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"golang.org/x/crypto/bcrypt"
 )
 
+const minPasswordLen = 8
+
 type Service struct {
-	repo Repository
-	cfg  config.Config
+	repo  Repository
+	cfg   config.Config
+	cache *appredis.Client
 }
 
-func NewService(repo Repository, cfg config.Config) *Service {
-	return &Service{repo: repo, cfg: cfg}
+func NewService(repo Repository, cfg config.Config, cache *appredis.Client) *Service {
+	return &Service{repo: repo, cfg: cfg, cache: cache}
 }
 
 type RegisterInput struct {
@@ -36,7 +42,7 @@ type LoginInput struct {
 func (s *Service) Register(ctx context.Context, in RegisterInput) (*domain.AuthResult, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
-	if in.Name == "" || in.Email == "" || len(in.Password) < 6 {
+	if in.Name == "" || in.Email == "" || len(in.Password) < minPasswordLen {
 		return nil, domain.ErrInvalid
 	}
 
@@ -55,7 +61,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*domain.AuthR
 		return nil, err
 	}
 
-	tokens, err := s.issueTokens(model.ID, model.Role)
+	tokens, err := s.issueTokens(ctx, model.ID, model.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +90,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*domain.AuthResult,
 		return nil, domain.ErrUnauthorized
 	}
 
-	tokens, err := s.issueTokens(model.ID, model.Role)
+	tokens, err := s.issueTokens(ctx, model.ID, model.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -100,18 +106,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*domain.Aut
 		return nil, domain.ErrInvalid
 	}
 
-	claims := &middleware.Claims{}
-	token, err := jwt.ParseWithClaims(refreshToken, claims, func(t *jwt.Token) (any, error) {
-		return []byte(s.cfg.JWTSecret), nil
-	})
-	if err != nil || !token.Valid {
-		if err != nil && strings.Contains(err.Error(), "token is expired") {
-			return nil, domain.ErrTokenExpired
-		}
-		return nil, domain.ErrUnauthorized
+	claims, err := s.parseRefresh(refreshToken)
+	if err != nil {
+		return nil, err
 	}
-	if claims.Type != "refresh" {
-		return nil, domain.ErrUnauthorized
+	if err := s.consumeRefreshJTI(ctx, claims.ID); err != nil {
+		return nil, err
 	}
 
 	user, err := s.repo.FindByID(ctx, claims.UserID)
@@ -119,11 +119,23 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*domain.Aut
 		return nil, domain.ErrUnauthorized
 	}
 
-	tokens, err := s.issueTokens(user.ID, user.Role)
+	tokens, err := s.issueTokens(ctx, user.ID, user.Role)
 	if err != nil {
 		return nil, err
 	}
 	return &tokens, nil
+}
+
+// Logout revokes the presented refresh token (rotation store delete).
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+	if refreshToken == "" {
+		return domain.ErrInvalid
+	}
+	claims, err := s.parseRefresh(refreshToken)
+	if err != nil {
+		return err
+	}
+	return s.revokeRefreshJTI(ctx, claims.ID)
 }
 
 func (s *Service) Me(ctx context.Context, userID uint) (*domain.User, error) {
@@ -135,7 +147,27 @@ func (s *Service) Me(ctx context.Context, userID uint) (*domain.User, error) {
 	return &u, nil
 }
 
-func (s *Service) issueTokens(userID uint, role string) (domain.AuthTokens, error) {
+func (s *Service) parseRefresh(refreshToken string) (*middleware.Claims, error) {
+	claims := &middleware.Claims{}
+	token, err := jwt.ParseWithClaims(refreshToken, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, domain.ErrUnauthorized
+		}
+		return []byte(s.cfg.JWTSecret), nil
+	})
+	if err != nil || token == nil || !token.Valid {
+		if err != nil && strings.Contains(err.Error(), "token is expired") {
+			return nil, domain.ErrTokenExpired
+		}
+		return nil, domain.ErrUnauthorized
+	}
+	if claims.Type != "refresh" {
+		return nil, domain.ErrUnauthorized
+	}
+	return claims, nil
+}
+
+func (s *Service) issueTokens(ctx context.Context, userID uint, role string) (domain.AuthTokens, error) {
 	now := time.Now()
 
 	accessClaims := middleware.Claims{
@@ -152,11 +184,13 @@ func (s *Service) issueTokens(userID uint, role string) (domain.AuthTokens, erro
 		return domain.AuthTokens{}, err
 	}
 
+	jti := uuid.NewString()
 	refreshClaims := middleware.Claims{
 		UserID: userID,
 		Role:   role,
 		Type:   "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.JWTRefreshTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
@@ -166,10 +200,50 @@ func (s *Service) issueTokens(userID uint, role string) (domain.AuthTokens, erro
 		return domain.AuthTokens{}, err
 	}
 
+	if err := s.storeRefreshJTI(ctx, jti, userID); err != nil {
+		return domain.AuthTokens{}, err
+	}
+
 	return domain.AuthTokens{
 		AccessToken:  access,
 		RefreshToken: refresh,
 	}, nil
+}
+
+func refreshKey(jti string) string {
+	return "refresh:" + jti
+}
+
+func (s *Service) storeRefreshJTI(ctx context.Context, jti string, userID uint) error {
+	if s.cache == nil || jti == "" {
+		return nil
+	}
+	return s.cache.Set(ctx, refreshKey(jti), fmt.Sprintf("%d", userID), s.cfg.JWTRefreshTTL)
+}
+
+func (s *Service) consumeRefreshJTI(ctx context.Context, jti string) error {
+	if s.cache == nil {
+		return nil
+	}
+	if jti == "" {
+		return domain.ErrUnauthorized
+	}
+	key := refreshKey(jti)
+	n, err := s.cache.Raw().Exists(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return domain.ErrUnauthorized
+	}
+	return s.cache.Del(ctx, key)
+}
+
+func (s *Service) revokeRefreshJTI(ctx context.Context, jti string) error {
+	if s.cache == nil || jti == "" {
+		return nil
+	}
+	return s.cache.Del(ctx, refreshKey(jti))
 }
 
 func toDomain(m *UserModel) domain.User {

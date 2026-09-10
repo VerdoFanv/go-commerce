@@ -1,0 +1,3 @@
+-- Revert to event_id-only PK (demo rollback). Drops multi-consumer independence.
+ALTER TABLE processed_events DROP CONSTRAINT IF EXISTS processed_events_pkey;
+ALTER TABLE processed_events ADD PRIMARY KEY (event_id);

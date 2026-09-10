@@ -41,7 +41,7 @@ Baca sambil praktek. Jangan hanya scroll.
 |---------|-----|
 | API | http://192.168.0.155/ |
 | Health ready | http://192.168.0.155/health/ready |
-| Swagger | http://192.168.0.155/docs |
+| Swagger | http://192.168.0.155/docs | Hanya jika `APP_ENV` non-production |
 | Metrics | http://192.168.0.155/metrics |
 
 Header wajib di `/api/v1`: `apikey` dari `.env` / `k8s/secret.yaml`  
@@ -112,6 +112,18 @@ curl -s -X POST http://192.168.0.155/api/v1/lab/typesense/reindex \
 
 ## 3. API baru untuk belajar (lab + wishlist + commerce)
 
+| Method | Path | Catatan |
+|--------|------|---------|
+| `POST` | `/api/v1/authentication/logout` | Revoke refresh jti |
+| `GET` | `/api/v1/products/catalog` | Browse marketplace (buyer) |
+| `POST` | `/api/v1/orders` | Wajib `Idempotency-Key` |
+| `POST` | `/api/v1/orders/:id/pay` | Lab override; worker = charge default |
+| `POST` | `/api/v1/orders/:id/fulfill` | **admin** only |
+| `GET` | `/api/v1/lab/commerce/failure-matrix` | Failure matrix hidup (**admin**) |
+| `GET/POST` | `/api/v1/lab/outbox/*` | Pending / pause / resume / relay-once (**admin**, non-prod) |
+
+Lab **dimatikan** saat `APP_ENV=production`. Pakai token **admin** untuk chaos outbox.
+
 Semua butuh `apikey` + JWT (kecuali health/docs).
 
 ### Orders — complexity bisnis (outbox, stock, payment)
@@ -123,10 +135,10 @@ Detail kode: [`docs/belajar/09-commerce-reliability.md`](belajar/09-commerce-rel
 | `POST` | `/api/v1/orders` | Idempotency-Key + TX outbox + stock hold |
 | `GET` | `/api/v1/orders` / `/:id` | List / detail |
 | `POST` | `/api/v1/orders/:id/cancel` | State machine + release stock |
-| `POST` | `/api/v1/orders/:id/pay` | Simulator `outcome=success\|fail\|timeout` |
-| `POST` | `/api/v1/orders/:id/fulfill` | `paid` → `fulfilled` |
-| `GET` | `/api/v1/lab/commerce/failure-matrix` | Failure matrix hidup |
-| `GET/POST` | `/api/v1/lab/outbox/*` | Pending / pause / resume / relay-once |
+| `POST` | `/api/v1/orders/:id/pay` | Lab override; worker = charge default |
+| `POST` | `/api/v1/orders/:id/fulfill` | **admin** only |
+| `GET` | `/api/v1/lab/commerce/failure-matrix` | Failure matrix hidup (**admin**) |
+| `GET/POST` | `/api/v1/lab/outbox/*` | Pending / pause / resume / relay-once (**admin**) |
 
 ```bash
 curl -s -X POST $HOST/api/v1/orders \
@@ -624,8 +636,10 @@ docker inspect golang-be-kafka-1 --format '{{.State.Status}} {{.State.ExitCode}}
 - [ ] `k8s/secret.yaml` tidak pernah di-commit  
 - [ ] Password infra-db hanya untuk LAN lab, bukan production public  
 - [ ] Ganti `JWT_SECRET` / `API_KEY` kalau expose ke luar rumah  
-- [ ] Jangan publish IP + password lab ke chat publik  
-- [ ] Rotasi password SSH kalau pernah dishare  
+- [ ] Jangan publish IP + password lab/SSH ke chat publik — rotasi kalau pernah dishare  
+- [ ] Lab chaos pakai token **admin**; `APP_ENV=production` menonaktifkan `/lab` dan `/docs`  
+- [ ] Sebelum public: set `CORS_ORIGINS` eksplisit (bukan `*`) + TLS/HSTS  
+- [ ] Deploy: jangan edit Go langsung di SSH — pull dari git saja  
 
 ---
 
@@ -634,10 +648,12 @@ docker inspect golang-be-kafka-1 --format '{{.State.Status}} {{.State.ExitCode}}
 | Topik | Path |
 |-------|------|
 | Migrations / seed | `migrations/000003_*.sql`, `000004_*.sql` |
-| Lab API | `internal/lab/` |
-| Wishlist | `internal/wishlist/` |
+| Lab API | `internal/http/lab/` |
+| Wishlist | `internal/http/wishlist/` |
+| Order | `internal/http/order/` |
 | Manifests | `k8s/` |
 | OpenAPI | `docs/openapi.yaml` |
 | README utama | `README.md` |
+| Deploy | lokal commit/push → server `git pull` + rebuild |
 
 Selamat belajar — tiap endpoint lab ada field `lesson` di response; baca itu juga.

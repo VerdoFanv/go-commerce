@@ -17,10 +17,14 @@ import (
 type Repository interface {
 	CreateOrder(ctx context.Context, in CreateOrderTX) (*OrderModel, error)
 	FindByID(ctx context.Context, userID, id uint) (*OrderModel, []OrderItemModel, error)
+	FindByIDAny(ctx context.Context, id uint) (*OrderModel, []OrderItemModel, error)
 	ListByUser(ctx context.Context, userID uint, limit int) ([]OrderModel, error)
 	Cancel(ctx context.Context, userID, id uint) (*OrderModel, error)
+	// CancelSystem cancels without ownership check (hold expiry / ops).
+	CancelSystem(ctx context.Context, id uint) (*OrderModel, error)
 	Pay(ctx context.Context, userID, id uint, outcome string, attemptKey string) (*OrderModel, *PaymentModel, error)
-	Fulfill(ctx context.Context, userID, id uint) (*OrderModel, error)
+	Fulfill(ctx context.Context, id uint) (*OrderModel, error)
+	ListExpiredPendingIDs(ctx context.Context, olderThan time.Time, limit int) ([]uint, error)
 	FindIdempotency(ctx context.Context, userID uint, key string) (*IdempotencyModel, error)
 	SaveIdempotencyResponse(ctx context.Context, userID uint, key, method, path, reqHash string, status int, body []byte) error
 }
@@ -164,6 +168,21 @@ func (r *repository) FindByID(ctx context.Context, userID, id uint) (*OrderModel
 	return &order, items, nil
 }
 
+func (r *repository) FindByIDAny(ctx context.Context, id uint) (*OrderModel, []OrderItemModel, error) {
+	var order OrderModel
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&order).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, domain.ErrNotFound
+		}
+		return nil, nil, err
+	}
+	var items []OrderItemModel
+	if err := r.db.WithContext(ctx).Where("order_id = ?", id).Find(&items).Error; err != nil {
+		return nil, nil, err
+	}
+	return &order, items, nil
+}
+
 func (r *repository) ListByUser(ctx context.Context, userID uint, limit int) ([]OrderModel, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -178,15 +197,40 @@ func (r *repository) ListByUser(ctx context.Context, userID uint, limit int) ([]
 }
 
 func (r *repository) Cancel(ctx context.Context, userID, id uint) (*OrderModel, error) {
-	var out *OrderModel
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.cancelLocked(ctx, func(tx *gorm.DB) (*OrderModel, error) {
 		var order OrderModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND user_id = ?", id, userID).
 			First(&order).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return domain.ErrNotFound
+				return nil, domain.ErrNotFound
 			}
+			return nil, err
+		}
+		return &order, nil
+	})
+}
+
+func (r *repository) CancelSystem(ctx context.Context, id uint) (*OrderModel, error) {
+	return r.cancelLocked(ctx, func(tx *gorm.DB) (*OrderModel, error) {
+		var order OrderModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", id).
+			First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, domain.ErrNotFound
+			}
+			return nil, err
+		}
+		return &order, nil
+	})
+}
+
+func (r *repository) cancelLocked(ctx context.Context, load func(tx *gorm.DB) (*OrderModel, error)) (*OrderModel, error) {
+	var out *OrderModel
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		order, err := load(tx)
+		if err != nil {
 			return err
 		}
 		next, err := domain.Transition(order.Status, domain.OrderCancelled)
@@ -200,7 +244,7 @@ func (r *repository) Cancel(ctx context.Context, userID, id uint) (*OrderModel, 
 		order.Status = next
 		order.Version++
 		order.UpdatedAt = now
-		if err := tx.Save(&order).Error; err != nil {
+		if err := tx.Save(order).Error; err != nil {
 			return err
 		}
 		payload := map[string]any{
@@ -211,10 +255,24 @@ func (r *repository) Cancel(ctx context.Context, userID, id uint) (*OrderModel, 
 		if _, err := r.outbox.Enqueue(tx, "order", uint64(order.ID), domain.EventOrderCancelled, payload); err != nil {
 			return err
 		}
-		out = &order
+		out = order
 		return nil
 	})
 	return out, err
+}
+
+func (r *repository) ListExpiredPendingIDs(ctx context.Context, olderThan time.Time, limit int) ([]uint, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var ids []uint
+	err := r.db.WithContext(ctx).
+		Model(&OrderModel{}).
+		Where("status = ? AND created_at < ?", domain.OrderPendingPayment, olderThan).
+		Order("id ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error
+	return ids, err
 }
 
 // Pay applies a simulated payment outcome inside a transaction (manual API path).
@@ -362,12 +420,12 @@ func commitReservations(tx *gorm.DB, orderID uint) error {
 		Updates(map[string]any{"status": domain.ReservationCommitted, "updated_at": now}).Error
 }
 
-func (r *repository) Fulfill(ctx context.Context, userID, id uint) (*OrderModel, error) {
+func (r *repository) Fulfill(ctx context.Context, id uint) (*OrderModel, error) {
 	var out *OrderModel
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order OrderModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND user_id = ?", id, userID).
+			Where("id = ?", id).
 			First(&order).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrNotFound

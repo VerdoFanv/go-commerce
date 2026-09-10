@@ -22,6 +22,8 @@ func Config() config.Config {
 		RateLimitWindow: time.Minute,
 		RequestTimeout:  10 * time.Second,
 		ShutdownTimeout: 5 * time.Second,
+		CORSOrigins:     []string{"*"},
+		OrderHoldTTL:    15 * time.Minute,
 		MetricsPort:     "2112",
 	}
 }

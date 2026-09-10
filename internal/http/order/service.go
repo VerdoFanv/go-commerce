@@ -6,18 +6,21 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
 )
 
 type Service struct {
 	repo Repository
+	cfg  config.Config
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, cfg config.Config) *Service {
+	return &Service{repo: repo, cfg: cfg}
 }
 
 type CreateInput struct {
@@ -29,8 +32,8 @@ type CreateInput struct {
 }
 
 type CreateItemInput struct {
-	ProductID uint `json:"productId"`
-	Qty       int  `json:"qty"`
+	ProductID uint `json:"productId" validate:"required,gt=0"`
+	Qty       int  `json:"qty" validate:"required,gt=0"`
 }
 
 type PayInput struct {
@@ -131,12 +134,60 @@ func (s *Service) Pay(ctx context.Context, in PayInput) (*domain.Order, *Payment
 	return full, pay, nil
 }
 
-func (s *Service) Fulfill(ctx context.Context, userID, id uint) (*domain.Order, error) {
-	model, err := s.repo.Fulfill(ctx, userID, id)
+// Fulfill is an admin/ops action: mark a paid order as shipped/fulfilled.
+func (s *Service) Fulfill(ctx context.Context, id uint) (*domain.Order, error) {
+	model, err := s.repo.Fulfill(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, userID, model.ID)
+	full, items, err := s.repo.FindByIDAny(ctx, model.ID)
+	if err != nil {
+		return nil, err
+	}
+	return toDomain(full, items), nil
+}
+
+// ExpireStaleHolds cancels unpaid orders older than OrderHoldTTL and releases stock.
+func (s *Service) ExpireStaleHolds(ctx context.Context) (int, error) {
+	ttl := s.cfg.OrderHoldTTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	cutoff := time.Now().UTC().Add(-ttl)
+	ids, err := s.repo.ListExpiredPendingIDs(ctx, cutoff, 50)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		if _, err := s.repo.CancelSystem(ctx, id); err != nil {
+			slog.Warn("hold expiry cancel failed", "orderId", id, "err", err)
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
+// RunHoldExpiry periodically releases stock held by unpaid orders past TTL.
+func (s *Service) RunHoldExpiry(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := s.ExpireStaleHolds(ctx)
+			if err != nil {
+				slog.Warn("hold expiry sweep failed", "err", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("expired unpaid order holds", "count", n)
+			}
+		}
+	}
 }
 
 func hashCreateRequest(items []CreateItemInput) string {
@@ -147,12 +198,12 @@ func hashCreateRequest(items []CreateItemInput) string {
 
 func toDomain(m *OrderModel, items []OrderItemModel) *domain.Order {
 	o := &domain.Order{
-		ID:       m.ID,
-		UserID:   m.UserID,
-		Status:   m.Status,
-		Total:    m.Total,
-		Currency: m.Currency,
-		Version:  m.Version,
+		ID:        m.ID,
+		UserID:    m.UserID,
+		Status:    m.Status,
+		Total:     m.Total,
+		Currency:  m.Currency,
+		Version:   m.Version,
 		CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: m.UpdatedAt.UTC().Format(time.RFC3339),
 	}

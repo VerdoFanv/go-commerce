@@ -18,14 +18,14 @@ Kalau goal-mu mereplikasi problem bisnis produksi: **baca 01–04 singkat, lalu 
 | # | File | Isi | Update terbaru |
 |---|------|-----|----------------|
 | 1 | [01-peta-folder.md](01-peta-folder.md) | Peta `internal/` API vs worker vs shared | + `order`, `dispatch`, outbox/inbox/ledger |
-| 2 | [02-entrypoints.md](02-entrypoints.md) | `cmd/api` & `cmd/worker` + fx lifecycle | + outbox relay, worker Postgres + dispatch |
-| 3 | [03-shared-core.md](03-shared-core.md) | domain, config, metrics, response, migrations | + `000005`/`000006`, outbox lag metric |
+| 2 | [02-entrypoints.md](02-entrypoints.md) | `cmd/api` & `cmd/worker` + fx lifecycle | + outbox relay, **hold expiry**, worker dispatch |
+| 3 | [03-shared-core.md](03-shared-core.md) | domain, config, metrics, response, migrations | + `000007` inbox composite, CORS/HSTS/hold TTL |
 | 4 | [04-platform.md](04-platform.md) | Adapter infra | + **outbox**, **inbox**, **ledger** |
-| 5 | [05-http-server-middleware.md](05-http-server-middleware.md) | Gin + middleware | Idempotency-Key di CORS |
-| 6 | [06-http-features.md](06-http-features.md) | Auth, product, wishlist, **order**, lab, notify | routes commerce + lab outbox |
+| 5 | [05-http-server-middleware.md](05-http-server-middleware.md) | Gin + middleware | Security/CORS prod, RBAC wired, WS apikey |
+| 6 | [06-http-features.md](06-http-features.md) | Auth, product, wishlist, **order**, lab, notify | logout/rotate, catalog, lab admin, fulfill admin |
 | 7 | [07-worker.md](07-worker.md) | Worker penuh | dispatch → payment / inventory / audit |
 | 8 | [08-alur-end-to-end.md](08-alur-end-to-end.md) | Cerita request | product **dan** order E2E |
-| 9 | [09-commerce-reliability.md](09-commerce-reliability.md) | Lab problem sistem besar | outbox, inbox, ledger, fulfill, chaos |
+| 9 | [09-commerce-reliability.md](09-commerce-reliability.md) | Lab problem sistem besar | hold TTL, inbox composite, payment ownership |
 
 Ops / deploy (bukan walkthrough kode):
 

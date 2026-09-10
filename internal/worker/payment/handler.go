@@ -1,4 +1,6 @@
 // Package payment simulates a payment provider reacting to order.created events.
+// This is the *canonical* charge path for the commerce lab (async provider).
+// POST /orders/:id/pay is a manual override for teaching fail/timeout outcomes.
 package payment
 
 import (

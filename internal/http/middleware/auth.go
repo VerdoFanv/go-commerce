@@ -35,25 +35,9 @@ func Auth(secret string) gin.HandlerFunc {
 		}
 
 		tokenStr := strings.TrimPrefix(header, "Bearer ")
-		claims := &Claims{}
-		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, domain.ErrUnauthorized
-			}
-			return []byte(secret), nil
-		})
-		if err != nil || token == nil || !token.Valid {
-			if err != nil && strings.Contains(err.Error(), "token is expired") {
-				unauthorized(c, domain.ErrTokenExpired)
-				c.Abort()
-				return
-			}
-			unauthorized(c, domain.ErrUnauthorized)
-			c.Abort()
-			return
-		}
-		if claims.Type != "" && claims.Type != "access" {
-			unauthorized(c, domain.ErrUnauthorized)
+		claims, err := ParseAccessToken(secret, tokenStr)
+		if err != nil {
+			unauthorized(c, err)
 			c.Abort()
 			return
 		}
@@ -64,13 +48,35 @@ func Auth(secret string) gin.HandlerFunc {
 	}
 }
 
-// ParseToken validates a token outside the HTTP middleware chain (WebSocket upgrade).
+// ParseAccessToken validates an access token (HMAC + type=access). Used by Auth and WebSocket.
+func ParseAccessToken(secret, tokenStr string) (*Claims, error) {
+	claims, err := parseToken(secret, tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Type != "" && claims.Type != "access" {
+		return nil, domain.ErrUnauthorized
+	}
+	return claims, nil
+}
+
+// ParseToken is an alias kept for callers; enforces the same rules as HTTP Auth.
 func ParseToken(secret, tokenStr string) (*Claims, error) {
+	return ParseAccessToken(secret, tokenStr)
+}
+
+func parseToken(secret, tokenStr string) (*Claims, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, domain.ErrUnauthorized
+		}
 		return []byte(secret), nil
 	})
 	if err != nil || token == nil || !token.Valid {
+		if err != nil && strings.Contains(err.Error(), "token is expired") {
+			return nil, domain.ErrTokenExpired
+		}
 		return nil, domain.ErrUnauthorized
 	}
 	return claims, nil

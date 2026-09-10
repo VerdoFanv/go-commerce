@@ -27,13 +27,14 @@ Kedua binary pakai **Uber fx**.
 
 ### Lifecycle OnStart
 
-1. `database.Migrate` — **hanya API** (termasuk `000005` commerce, `000006` inbox/ledger).
+1. `database.Migrate` — **hanya API** (`000001`…`000007`, termasuk commerce + inbox composite).
 2. `kafka.EnsureTopics`.
 3. `go notifier.Run` — group notifier → WebSocket.
 4. `go relay.Run` — publish `outbox_events` yang belum `published_at`.
-5. `go ListenAndServe`.
+5. `go orderSvc.RunHoldExpiry` — cancel `pending_payment` lewat `ORDER_HOLD_TTL`, release stock.
+6. `go ListenAndServe`.
 
-OnStop: cancel notifier + relay → `http.Shutdown` → close clients.
+OnStop: cancel notifier + relay + hold-expiry → `http.Shutdown` → close clients.
 
 ### Kenapa relay di API?
 

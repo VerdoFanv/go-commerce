@@ -13,7 +13,7 @@ import (
 
 func newService() (*auth.Service, *mocks.AuthRepository) {
 	repo := mocks.NewAuthRepository()
-	return auth.NewService(repo, testutil.Config()), repo
+	return auth.NewService(repo, testutil.Config(), nil), repo
 }
 
 func TestRegister_Success(t *testing.T) {
@@ -22,7 +22,7 @@ func TestRegister_Success(t *testing.T) {
 	result, err := svc.Register(context.Background(), auth.RegisterInput{
 		Name:     "  Andi  ",
 		Email:    "  Andi@Example.com ",
-		Password: "secret1",
+		Password: "secret12",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "Andi", result.User.Name)
@@ -35,8 +35,8 @@ func TestRegister_InvalidInput(t *testing.T) {
 	svc, _ := newService()
 
 	cases := []auth.RegisterInput{
-		{Name: "", Email: "a@b.com", Password: "secret1"},
-		{Name: "Andi", Email: "", Password: "secret1"},
+		{Name: "", Email: "a@b.com", Password: "secret12"},
+		{Name: "Andi", Email: "", Password: "secret12"},
 		{Name: "Andi", Email: "a@b.com", Password: "123"},
 	}
 	for _, in := range cases {
@@ -50,7 +50,7 @@ func TestRegister_EmailTaken(t *testing.T) {
 	repo.CreateErr = domain.ErrEmailTaken
 
 	_, err := svc.Register(context.Background(), auth.RegisterInput{
-		Name: "Andi", Email: "andi@example.com", Password: "secret1",
+		Name: "Andi", Email: "andi@example.com", Password: "secret12",
 	})
 	require.ErrorIs(t, err, domain.ErrEmailTaken)
 }
@@ -58,12 +58,12 @@ func TestRegister_EmailTaken(t *testing.T) {
 func TestLogin_Success(t *testing.T) {
 	svc, _ := newService()
 	_, err := svc.Register(context.Background(), auth.RegisterInput{
-		Name: "Andi", Email: "andi@example.com", Password: "secret1",
+		Name: "Andi", Email: "andi@example.com", Password: "secret12",
 	})
 	require.NoError(t, err)
 
 	result, err := svc.Login(context.Background(), auth.LoginInput{
-		Email: "ANDI@example.com", Password: "secret1",
+		Email: "ANDI@example.com", Password: "secret12",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "andi@example.com", result.User.Email)
@@ -72,7 +72,7 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	svc, _ := newService()
 	_, err := svc.Register(context.Background(), auth.RegisterInput{
-		Name: "Andi", Email: "andi@example.com", Password: "secret1",
+		Name: "Andi", Email: "andi@example.com", Password: "secret12",
 	})
 	require.NoError(t, err)
 
@@ -85,7 +85,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 func TestLogin_UnknownEmail(t *testing.T) {
 	svc, _ := newService()
 	_, err := svc.Login(context.Background(), auth.LoginInput{
-		Email: "missing@example.com", Password: "secret1",
+		Email: "missing@example.com", Password: "secret12",
 	})
 	require.ErrorIs(t, err, domain.ErrUnauthorized)
 }
@@ -93,7 +93,7 @@ func TestLogin_UnknownEmail(t *testing.T) {
 func TestRefresh_Success(t *testing.T) {
 	svc, _ := newService()
 	registered, err := svc.Register(context.Background(), auth.RegisterInput{
-		Name: "Andi", Email: "andi@example.com", Password: "secret1",
+		Name: "Andi", Email: "andi@example.com", Password: "secret12",
 	})
 	require.NoError(t, err)
 
@@ -106,7 +106,7 @@ func TestRefresh_Success(t *testing.T) {
 func TestRefresh_AccessTokenRejected(t *testing.T) {
 	svc, _ := newService()
 	registered, err := svc.Register(context.Background(), auth.RegisterInput{
-		Name: "Andi", Email: "andi@example.com", Password: "secret1",
+		Name: "Andi", Email: "andi@example.com", Password: "secret12",
 	})
 	require.NoError(t, err)
 
@@ -126,7 +126,7 @@ func TestRefresh_Expired(t *testing.T) {
 func TestMe_Success(t *testing.T) {
 	svc, _ := newService()
 	registered, err := svc.Register(context.Background(), auth.RegisterInput{
-		Name: "Andi", Email: "andi@example.com", Password: "secret1",
+		Name: "Andi", Email: "andi@example.com", Password: "secret12",
 	})
 	require.NoError(t, err)
 

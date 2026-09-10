@@ -28,8 +28,9 @@ Beyond infra, it also labs **commerce reliability** problems found in large syst
 - **Commerce lab** — orders, stock holds, payment simulator, idempotency keys, failure-matrix endpoints
 - **Observability** — Prometheus / Grafana / OpenTelemetry / Loki (opt-in)
 - **Polyglot persistence** — PostgreSQL + Redis + MongoDB + Typesense
-- **Security** — JWT + RBAC, rate limiting, API key gate, OWASP headers; secrets from env / K8s Secret
+- **Security** — JWT + RBAC (lab/fulfill admin), refresh rotation + logout, rate limiting (auth fail-closed), API key (constant-time), OWASP headers, CORS allowlist, optional HSTS; secrets from env / K8s Secret
 - **Delivery** — GitLab CI **and/or** manual deploy to k3s with zero-downtime rolling updates
+- **Deploy habit** — ubah kode lokal → commit/push → di server hanya `git pull` + rebuild/rollout (jangan edit kode langsung di SSH)
 
 ---
 
@@ -226,11 +227,13 @@ All `/api/v1` routes require `apikey`; protected routes also need `Authorization
 | `GET` | `/health/live` | — | Liveness |
 | `GET` | `/health/ready` | — | Readiness (PG/Redis/Mongo/Typesense) |
 | `GET` | `/metrics` | — | Prometheus (includes `golangbe_outbox_pending`) |
-| `POST` | `/api/v1/authentication/register` | apikey | Create account |
+| `POST` | `/api/v1/authentication/register` | apikey | Create account (password min 8) |
 | `POST` | `/api/v1/authentication/login` | apikey | Issue tokens |
-| `POST` | `/api/v1/authentication/refresh-token` | apikey | Rotate tokens |
+| `POST` | `/api/v1/authentication/refresh-token` | apikey | Rotate refresh (jti in Redis) |
+| `POST` | `/api/v1/authentication/logout` | apikey | Revoke refresh jti |
 | `GET` | `/api/v1/authentication/me` | +bearer | Current user |
-| `GET` | `/api/v1/products` | +bearer | Cursor pagination + cache |
+| `GET` | `/api/v1/products` | +bearer | Seller's own catalog (cursor + cache) |
+| `GET` | `/api/v1/products/catalog` | +bearer | Buyer marketplace browse |
 | `GET` | `/api/v1/products/search?q=` | +bearer | Typesense full-text |
 | `POST` | `/api/v1/products` | +bearer | Create → Kafka event (async) |
 | `GET`/`PUT`/`DELETE` | `/api/v1/products/:id` | +bearer | Detail / update / delete |
@@ -238,12 +241,10 @@ All `/api/v1` routes require `apikey`; protected routes also need `Authorization
 | `POST` | `/api/v1/orders` | +bearer + **Idempotency-Key** | Create order (TX outbox + stock hold) |
 | `GET` | `/api/v1/orders` / `/:id` | +bearer | List / detail |
 | `POST` | `/api/v1/orders/:id/cancel` | +bearer | Cancel + release stock |
-| `POST` | `/api/v1/orders/:id/pay` | +bearer | Payment simulator (`success\|fail\|timeout`) |
-| `POST` | `/api/v1/orders/:id/fulfill` | +bearer | `paid` → `fulfilled` |
-| `GET` | `/api/v1/lab/commerce/failure-matrix` | +bearer | Live failure-matrix doc |
-| `GET`/`POST` | `/api/v1/lab/outbox/*` | +bearer | Pending / pause / resume / relay-once |
-| `GET`/`POST`/`DELETE` | `/api/v1/lab/*` | +bearer | Infra learning endpoints |
-| `GET` | `/ws/products?token=` | JWT | Real-time events |
+| `POST` | `/api/v1/orders/:id/pay` | +bearer | Lab payment override (`success\|fail\|timeout`) |
+| `POST` | `/api/v1/orders/:id/fulfill` | +bearer **admin** | `paid` → `fulfilled` |
+| `GET` | `/api/v1/lab/*` | +bearer **admin**, non-prod | Infra / outbox chaos |
+| `GET` | `/ws/products?token=&apikey=` | JWT + apikey | Real-time events |
 
 Full contract: [`docs/openapi.yaml`](docs/openapi.yaml)
 
@@ -274,7 +275,7 @@ internal/
                             outbox, inbox, ledger
   metrics/                  shared Prometheus metrics
 
-migrations/                 000001…000006 (commerce + inbox/ledger)
+migrations/                 000001…000007 (commerce + inbox composite PK)
 scripts/load-orders.sh      concurrency / oversell demo
 k8s/ helm/                  deploy
 .gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
@@ -335,18 +336,23 @@ helm install golang-be ./helm/golang-be -n golang-be --create-namespace \
   --set config.hostIP=192.168.0.155
 ```
 
+**Server workflow (recommended):** edit locally → `git commit` + `git push` → on the box `git pull` → rebuild images → `kubectl rollout`. Do not patch Go sources over SSH.
+
 ---
 
 ## Design decisions worth reading
 
-- **Migrations over AutoMigrate** — reviewed, ordered, reversible SQL (`000001`…`000006`)
+- **Migrations over AutoMigrate** — reviewed, ordered, reversible SQL (`000001`…`000007`)
 - **Outbox for critical paths** — orders never depend on Kafka being up at request time
 - **Product async publish kept on purpose** — contrast with outbox; teach the dual-write failure mode
-- **At-least-once + inbox / unique sinks** — Kafka redelivery must not double-pay or double-release stock
+- **At-least-once + inbox `(event_id, consumer)`** — Kafka redelivery must not double-pay; multi-handler safe
+- **Hold TTL** — unpaid reservations auto-expire so stock is not stuck forever
+- **Payment ownership** — worker auto-charge is canonical; HTTP pay is a teaching override
 - **Stock ledger** — every hold/release/commit is an append-only movement
 - **Circuit breaker on search** — Typesense outage does not kill CRUD
-- **Fail-open rate limiter** — Redis blip never blocks all traffic
+- **Rate limit** — fail-closed on auth routes if Redis is down; fail-open elsewhere
 - **Async side effects on product** — Kafka/Typesense do not inflate HTTP latency
-- **Config validation at boot** — misconfig fails fast, including production secret guards
+- **Config validation at boot** — misconfig fails fast, including production secret / CORS guards
+- **Lab surface** — admin-only and disabled in production
 
 Learning path (Bahasa Indonesia): start at [`docs/belajar/README.md`](docs/belajar/README.md).

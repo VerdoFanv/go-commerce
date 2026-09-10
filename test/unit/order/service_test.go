@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/http/order"
+	"github.com/verdofanv/golang-be/test/testutil"
 )
 
 type fakeRepo struct {
@@ -48,6 +49,13 @@ func (f *fakeRepo) FindByID(_ context.Context, userID, id uint) (*order.OrderMod
 	return f.created, f.items, nil
 }
 
+func (f *fakeRepo) FindByIDAny(_ context.Context, id uint) (*order.OrderModel, []order.OrderItemModel, error) {
+	if f.created == nil || f.created.ID != id {
+		return nil, nil, domain.ErrNotFound
+	}
+	return f.created, f.items, nil
+}
+
 func (f *fakeRepo) ListByUser(_ context.Context, userID uint, _ int) ([]order.OrderModel, error) {
 	if f.created == nil || f.created.UserID != userID {
 		return nil, nil
@@ -63,8 +71,20 @@ func (f *fakeRepo) Cancel(_ context.Context, userID, id uint) (*order.OrderModel
 	return f.created, nil
 }
 
+func (f *fakeRepo) CancelSystem(_ context.Context, id uint) (*order.OrderModel, error) {
+	if f.created == nil || f.created.ID != id {
+		return nil, domain.ErrNotFound
+	}
+	f.created.Status = domain.OrderCancelled
+	return f.created, nil
+}
+
+func (f *fakeRepo) ListExpiredPendingIDs(_ context.Context, _ time.Time, _ int) ([]uint, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) Pay(_ context.Context, userID, id uint, outcome, _ string) (*order.OrderModel, *order.PaymentModel, error) {
-	if f.created == nil || f.created.UserID != userID || f.created.ID != id {
+	if f.created == nil || f.created.ID != id {
 		return nil, nil, domain.ErrNotFound
 	}
 	if outcome == "timeout" {
@@ -80,8 +100,8 @@ func (f *fakeRepo) Pay(_ context.Context, userID, id uint, outcome, _ string) (*
 	return f.created, pay, nil
 }
 
-func (f *fakeRepo) Fulfill(_ context.Context, userID, id uint) (*order.OrderModel, error) {
-	if f.created == nil || f.created.UserID != userID || f.created.ID != id {
+func (f *fakeRepo) Fulfill(_ context.Context, id uint) (*order.OrderModel, error) {
+	if f.created == nil || f.created.ID != id {
 		return nil, domain.ErrNotFound
 	}
 	f.created.Status = domain.OrderFulfilled
@@ -106,7 +126,7 @@ func itoa(v uint) string {
 }
 
 func TestCreate_RequiresIdempotencyKey(t *testing.T) {
-	svc := order.NewService(newFakeRepo())
+	svc := order.NewService(newFakeRepo(), testutil.Config())
 	_, _, _, err := svc.Create(context.Background(), order.CreateInput{
 		UserID: 1, Items: []order.CreateItemInput{{ProductID: 1, Qty: 1}},
 	})
@@ -115,7 +135,7 @@ func TestCreate_RequiresIdempotencyKey(t *testing.T) {
 
 func TestCreate_QueuesOutboxViaRepo(t *testing.T) {
 	repo := newFakeRepo()
-	svc := order.NewService(repo)
+	svc := order.NewService(repo, testutil.Config())
 	o, status, body, err := svc.Create(context.Background(), order.CreateInput{
 		UserID: 1, IdempotencyKey: "k1",
 		Items: []order.CreateItemInput{{ProductID: 9, Qty: 2}},
@@ -131,7 +151,7 @@ func TestCreate_QueuesOutboxViaRepo(t *testing.T) {
 
 func TestCreate_ReplaysIdempotentResponse(t *testing.T) {
 	repo := newFakeRepo()
-	svc := order.NewService(repo)
+	svc := order.NewService(repo, testutil.Config())
 	env := map[string]any{"success": true, "data": map[string]any{"id": 42}}
 	raw, _ := json.Marshal(env)
 	st := http.StatusCreated
@@ -164,7 +184,7 @@ func TestCreate_ReplaysIdempotentResponse(t *testing.T) {
 func TestPay_Timeout(t *testing.T) {
 	repo := newFakeRepo()
 	repo.created = &order.OrderModel{ID: 1, UserID: 1, Status: domain.OrderPendingPayment}
-	svc := order.NewService(repo)
+	svc := order.NewService(repo, testutil.Config())
 	_, _, err := svc.Pay(context.Background(), order.PayInput{UserID: 1, OrderID: 1, Outcome: "timeout"})
 	require.ErrorIs(t, err, domain.ErrUnavailable)
 }

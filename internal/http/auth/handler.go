@@ -24,6 +24,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
 		authGroup.POST("/register", h.register)
 		authGroup.POST("/login", h.login)
 		authGroup.POST("/refresh-token", h.refresh)
+		authGroup.POST("/logout", h.logout)
 		authGroup.GET("/me", middleware.Auth(jwtSecret), h.me)
 	}
 }
@@ -31,7 +32,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
 type registerRequest struct {
 	Name     string `json:"name" validate:"required"`
 	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=6"`
+	Password string `json:"password" validate:"required,min=8"`
 }
 
 type loginRequest struct {
@@ -86,6 +87,19 @@ func (h *Handler) refresh(c *gin.Context) {
 		return
 	}
 	response.OK(c, "token refreshed", tokens)
+}
+
+func (h *Handler) logout(c *gin.Context) {
+	var req refreshRequest
+	if err := response.BindJSON(c, &req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.svc.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+		mapErr(c, err)
+		return
+	}
+	response.OK(c, "logged out", nil)
 }
 
 func (h *Handler) me(c *gin.Context) {

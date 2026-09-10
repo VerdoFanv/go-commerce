@@ -16,21 +16,21 @@ Urutan `Use` (atas → bawah = luar → dalam):
 | 2 | `RequestID` | `X-Request-Id` (generate atau teruskan) |
 | 3 | `Tracing` | Span OTel per request |
 | 4 | `metrics.Middleware` | RED Prometheus |
-| 5 | `SecurityHeaders` | Header keamanan dasar |
-| 6 | CORS | Origin `*`, header `apikey` / `Authorization` / **`Idempotency-Key`** |
+| 5 | `SecurityHeaders(enableHSTS)` | OWASP headers (+ HSTS jika `ENABLE_HSTS=true`) |
+| 6 | CORS | `CORS_ORIGINS` (prod **melarang** `*`); header `apikey` / `Authorization` / **`Idempotency-Key`** |
 | 7 | `Timeout` | Batas waktu request (`REQUEST_TIMEOUT`) |
-| 8 | `RequestLogger` | Log method/path/status/latency |
+| 8 | `RequestLogger` | Log method/path/status/latency (tanpa body) |
 
 Lalu route:
 
 | Path | Auth | Fungsi |
 |------|------|--------|
 | `/health/live`, `/health/ready` | tidak | Probe k8s |
-| `/metrics` | tidak | Prometheus scrape |
-| `/debug/pprof/*` | tidak (non-prod) | Profiling |
+| `/metrics` | tidak | Prometheus scrape (isolasi di edge kalau public) |
+| `/debug/pprof/*` | non-prod only | Profiling |
 | `/api/v1/*` | **apikey** + rate limit | Semua REST fitur |
-| `/ws/products` | JWT query/header | WebSocket notify |
-| `/docs` | tidak | Static Swagger UI |
+| `/ws/products` | `apikey` + JWT access (`?token=` / `?apikey=`) | WebSocket notify |
+| `/docs` | non-prod only | Static Swagger UI |
 
 `NewHTTPServer` — bungkus engine di `net/http.Server` supaya `Shutdown` graceful.
 
@@ -40,7 +40,8 @@ Lalu route:
 
 ### `apikey.go` — `APIKey(expected)`
 
-- Baca header `apikey` (atau alias yang diizinkan CORS).
+- Baca header `apikey` atau `X-API-Key`.
+- Bandingkan dengan **constant-time** (`subtle.ConstantTimeCompare`).
 - Salah → `domain.ErrInvalidAPIKey` / 401.
 - Dipasang di group `/api/v1` saja.
 
@@ -48,30 +49,26 @@ Lalu route:
 
 | Symbol | Fungsi |
 |--------|--------|
-| `Claims` | `userId`, `role`, expiry |
-| `Auth(secret)` | Middleware: Bearer wajib, set context |
-| `ParseToken` | Dipakai refresh / WS authenticate |
+| `Claims` | `userId`, `role`, `type`, expiry (+ `jti` di refresh) |
+| `Auth(secret)` | Middleware: Bearer wajib, HMAC + `type=access`, set context |
+| `ParseAccessToken` / `ParseToken` | Sama ketatnya — dipakai WS |
 | `UserID` / `UserRole` | Helper dari `gin.Context` |
 
 ### `rbac.go` — `RequireRole(roles...)`
 
-Cek role dari context setelah `Auth`. (Siap dipakai route admin; product delete juga cek role di service.)
+Dipakai nyata di: **lab** (admin), **order fulfill** (admin). Product delete juga cek role di service.
 
 ### `ratelimit.go`
 
 | Symbol | Fungsi |
 |--------|--------|
-| `RateLimiter` | Interface Incr/window |
+| `RateLimiter` | Interface sliding window |
 | `NewRedisLimiter` | Implementasi Redis |
 | `RateLimit(limiter, max, window)` | 429 + `ErrRateLimited` |
 
-Tanpa Redis, limiter nil → rate limit no-op (lihat wiring server).
+Perilaku Redis error: **fail-closed** pada path `/authentication/*`, fail-open di route lain (tetap layani traffic).
 
-### `timeout.go`
-
-Cancel context kalau request lebih lama dari config.
-
-### `requestid.go` / `logger.go` / `security.go` / `tracing.go`
+### `timeout.go` / `requestid.go` / `logger.go` / `security.go` / `tracing.go`
 
 Observability + hygiene — tidak ubah business logic.
 
@@ -94,5 +91,6 @@ k3s readiness pakai `/health/ready` — pod tidak terima traffic kalau dependenc
 1. Gambar urutan middleware di kertas, cocokkan dengan `NewEngine`.
 2. Hit `/api/v1/...` tanpa `apikey` — pastikan gagal sebelum JWT.
 3. Bandingkan `/health/live` vs `/health/ready` saat Redis dimatikan.
+4. Di prod: pastikan lab route 404 dan `/docs` tidak terdaftar.
 
 Lanjut → [06-http-features.md](06-http-features.md)

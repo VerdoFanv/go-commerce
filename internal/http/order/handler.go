@@ -30,7 +30,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtSecret string) {
 		o.GET("/:id", h.getByID)
 		o.POST("/:id/cancel", h.cancel)
 		o.POST("/:id/pay", h.pay)
-		o.POST("/:id/fulfill", h.fulfill)
+		o.POST("/:id/fulfill", middleware.RequireRole(domain.RoleAdmin), h.fulfill)
 	}
 }
 
@@ -51,7 +51,7 @@ func (h *Handler) create(c *gin.Context) {
 	}
 	var req createRequest
 	if err := response.BindJSON(c, &req); err != nil {
-		response.FailCode(c, http.StatusBadRequest, err.Error(), domain.ErrorCode(domain.ErrInvalid))
+		response.FailCode(c, http.StatusBadRequest, "invalid request body", domain.ErrorCode(domain.ErrInvalid))
 		return
 	}
 	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
@@ -135,6 +135,8 @@ func (h *Handler) cancel(c *gin.Context) {
 }
 
 func (h *Handler) pay(c *gin.Context) {
+	// Manual pay is a *lab override* for teaching failure modes (fail/timeout).
+	// Canonical production-like path: worker auto-charges on order.created (see worker/payment).
 	userID, ok := middleware.UserID(c)
 	if !ok {
 		response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
@@ -161,17 +163,12 @@ func (h *Handler) pay(c *gin.Context) {
 }
 
 func (h *Handler) fulfill(c *gin.Context) {
-	userID, ok := middleware.UserID(c)
-	if !ok {
-		response.FailCode(c, http.StatusUnauthorized, domain.ErrUnauthorized.Error(), domain.ErrorCode(domain.ErrUnauthorized))
-		return
-	}
 	id, err := parseID(c.Param("id"))
 	if err != nil {
 		response.FailCode(c, http.StatusBadRequest, "invalid id", domain.ErrorCode(domain.ErrInvalid))
 		return
 	}
-	order, err := h.svc.Fulfill(c.Request.Context(), userID, id)
+	order, err := h.svc.Fulfill(c.Request.Context(), id)
 	if err != nil {
 		mapErr(c, err)
 		return

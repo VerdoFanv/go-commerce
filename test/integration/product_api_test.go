@@ -17,7 +17,7 @@ func setupProductAPI() (*gin.Engine, string) {
 	cfg := testutil.Config()
 
 	authRepo := mocks.NewAuthRepository()
-	authSvc := auth.NewService(authRepo, cfg)
+	authSvc := auth.NewService(authRepo, cfg, nil)
 	authHandler := auth.NewHandler(authSvc)
 
 	productRepo := mocks.NewProductRepository()
@@ -35,7 +35,7 @@ func registerAndLogin(t *testing.T, app *gin.Engine, apiKey string) string {
 	t.Helper()
 
 	_, body := testutil.DoJSON(t, app, "POST", "/api/v1/authentication/register", map[string]any{
-		"name": "Andi", "email": "andi@example.com", "password": "secret1",
+		"name": "Andi", "email": "andi@example.com", "password": "secret12",
 	}, testutil.WithAPIKey(apiKey))
 
 	data := testutil.DecodeData[map[string]any](t, body)
