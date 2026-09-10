@@ -21,8 +21,10 @@ data:
   KAFKA_TOPIC_DLQ: "products.events.dlq"
   KAFKA_GROUP_WORKER: "golang-be-worker"
   KAFKA_GROUP_NOTIFIER: "golang-be-notifier"
+  # Unauthenticated URI — infra-db Mongo with --auth WILL break the worker
+  # (createIndexes → Unauthorized). Always override from Secret:
+  #   MONGO_URI: mongodb://USER:PASS@HOST_IP:27017/?authSource=admin
   MONGO_URI: "mongodb://HOST_IP:27017"
-  # If Mongo enforces auth, override MONGO_URI from Secret instead (see secret.example.yaml).
   MONGO_DB: "golang_be_audit"
   TYPESENSE_ADDR: "http://HOST_IP:8108"
   # Tracing is opt-in (matches the `observability` compose profile).

@@ -31,7 +31,7 @@ Related: [BENCHMARK.md](BENCHMARK.md) · [belajar/10-failure-ops.md](belajar/10-
 | **Typesense down** | Ready **degraded**. `GET /products/search` **503** (CB). Product CRUD **201** | CB half-open after 30s | Start Typesense; optional `POST /lab/typesense/reindex` | `circuit breaker state change` logs |
 | **Typesense up, index kosong** | Search kosong / (versi lama) **503** `Collection not found` | API OnStart: ensure + reindex jika `numDocuments=0` | Restart API; atau `POST /lab/typesense/reindex`. Compose `(unhealthy)` sering false alarm — cek `curl :8108/health` | `/collections` → `[]` / docs=0 |
 | **API pod crash** | Brief errors; other replicas serve. In-memory outbox pause resets (relay resumes) | **k3s restart** | `kubectl -n golang-be get pods` | RestartCount |
-| **Worker pod crash** | Orders stay `pending_payment` until redelivery | **k3s restart** + Kafka rebalance | Delete pod / wait rollout | orders stuck; kafka lag |
+| **Worker CrashLoop `createIndexes` / Unauthorized** | Orders stuck `pending_payment`; no audit | No | Put auth `MONGO_URI` in Secret (overrides ConfigMap). Apply secret + `rollout restart deploy/worker` | worker logs `audit indexes` / `requires authentication` |
 | **Outbox paused** (lab) | Orders 201; events pile up; no payment progress | **No** — manual resume | `POST /lab/outbox/resume` (+ `relay-once`) | `lab/outbox/pending` paused:true |
 
 ---

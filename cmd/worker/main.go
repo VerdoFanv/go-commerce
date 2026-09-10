@@ -80,7 +80,7 @@ func registerLifecycle(
 				slog.Warn("ensure topics failed (broker may still be starting)", "err", err)
 			}
 			if err := store.EnsureIndexes(ctx); err != nil {
-				return fmt.Errorf("audit indexes: %w", err)
+				return fmt.Errorf("audit indexes: %w — if Unauthorized, set Secret MONGO_URI with auth (see k8s/secret.example.yaml)", err)
 			}
 
 			go func() {
