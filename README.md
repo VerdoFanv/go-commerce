@@ -17,7 +17,7 @@ It is **right-sized** for a single Ubuntu box (k3s + Docker Compose) — credibl
 
 Beyond infra, it also labs **commerce reliability** problems found in large systems: order state machine, inventory hold, payment choreography, transactional outbox, consumer inbox, stock ledger, and a live failure matrix.
 
-**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Benchmark / capacity](docs/BENCHMARK.md) · [Failure runbook](docs/FAILURE-RUNBOOK.md) · [Postman](docs/postman/) · [OpenAPI](docs/openapi.yaml) · [Code walkthrough (ID)](docs/belajar/README.md) · [Ops / lab (ID)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
+**Guides:** [Lab deploy / teardown](#lab-deploy-mode-a--commands) · [Benchmark / capacity](docs/BENCHMARK.md) · [Failure runbook](docs/FAILURE-RUNBOOK.md) · [Postman](docs/postman/) · [OpenAPI](docs/openapi.yaml) · [Code walkthrough (Indonesian)](docs/belajar/README.md) · [Ops / lab (Indonesian)](docs/PANDUAN-BELAJAR.md) · [GitLab setup](docs/GITLAB-SETUP.md) · [Public IP / domain](docs/PUBLIC-ACCESS.md)
 
 ---
 
@@ -30,7 +30,7 @@ Beyond infra, it also labs **commerce reliability** problems found in large syst
 - **Polyglot persistence** — PostgreSQL + Redis + MongoDB + Typesense
 - **Security** — JWT + RBAC (lab/fulfill admin), refresh rotation + logout, rate limiting (auth fail-closed), API key (constant-time), OWASP headers, CORS allowlist, optional HSTS; secrets from env / K8s Secret
 - **Delivery** — GitLab CI **and/or** manual deploy to k3s with zero-downtime rolling updates
-- **Deploy habit** — ubah kode lokal → commit/push → di server hanya `git pull` + rebuild/rollout (jangan edit kode langsung di SSH)
+- **Deploy habit** — change code locally → commit/push → on the server only `git pull` + rebuild/rollout (do not edit code over SSH)
 
 ---
 
@@ -120,7 +120,7 @@ flowchart LR
 **Order path** (`POST /api/v1/orders` + `Idempotency-Key`):
 same middleware → hold stock + order + outbox in **one TX** → relay → worker payment → inventory commit → audit Mongo.
 
-Deep dive (ID): [`docs/belajar/09-commerce-reliability.md`](docs/belajar/09-commerce-reliability.md).
+Deep dive (Indonesian): [`docs/belajar/09-commerce-reliability.md`](docs/belajar/09-commerce-reliability.md).
 
 ---
 
@@ -151,7 +151,7 @@ Deep dive (ID): [`docs/belajar/09-commerce-reliability.md`](docs/belajar/09-comm
 | **A — Self-deploy (lab)** | Day-to-day on one Ubuntu box        | Compose = Kafka/Typesense; **k3s** = api + worker     |
 | **B — GitLab CI/CD**      | Clean releases / portfolio pipeline | Push → build/scan → registry → optional manual deploy |
 
-Both are first-class. Ops detail (ID): [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md) · GitLab: [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md).
+Both are first-class. Ops detail (Indonesian): [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-BELAJAR.md) · GitLab: [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md).
 
 **Split that matters:** do **not** run api/worker in Compose when using k3s. Compose owns the data plane; k3s owns the app.
 
@@ -162,26 +162,26 @@ Both are first-class. Ops detail (ID): [`docs/PANDUAN-BELAJAR.md`](docs/PANDUAN-
 ### One-time / first boot
 
 ```bash
-# 1) shared data (Postgres / Redis / Mongo) — sudah di shared-net
+# 1) shared data (Postgres / Redis / Mongo) — already on shared-net
 cd ~/projects/infra-db && docker compose up -d
 
 # 2) k3s
-curl -sfL https://get.k3s.io | sh -   # skip kalau sudah terpasang
+curl -sfL https://get.k3s.io | sh -   # skip if already installed
 sudo systemctl enable --now k3s
 sudo k3s kubectl get nodes
 
-# 3) app repo + secrets (jangan commit secret.yaml / .env)
+# 3) app repo + secrets (never commit secret.yaml / .env)
 cd ~/projects/golang-be
 git pull
-cp .env.example .env                  # sesuaikan bila perlu
+cp .env.example .env                  # adjust if needed
 cp k8s/secret.example.yaml k8s/secret.yaml
-# isi API_KEY, JWT_SECRET, DB_USER/PASSWORD, TYPESENSE_API_KEY,
+# fill in API_KEY, JWT_SECRET, DB_USER/PASSWORD, TYPESENSE_API_KEY,
 # MONGO_URI=mongodb://admin:...@192.168.0.155:27017/?authSource=admin
 ```
 
-### Setiap kali deploy / update kode
+### Every deploy / code update
 
-Workflow: **edit lokal → commit → push → di server `git pull` → build & rollout** (jangan edit Go langsung di SSH).
+Workflow: **edit locally → commit → push → on the server `git pull` → build & rollout** (do not edit Go over SSH).
 
 ```bash
 cd ~/projects/golang-be
@@ -191,9 +191,9 @@ git pull
 HOST_IP=192.168.0.155 ./scripts/deploy-k3s-lab.sh
 ```
 
-Script itu menjalankan: Kafka+Typesense → build `golang-be-api:local` / `golang-be-worker:local` → `k3s ctr images import` → apply ConfigMap/Secret/manifests → rollout.
+That script runs: Kafka+Typesense → build `golang-be-api:local` / `golang-be-worker:local` → `k3s ctr images import` → apply ConfigMap/Secret/manifests → rollout.
 
-### Restart app saja (tanpa rebuild)
+### Restart the app only (no rebuild)
 
 ```bash
 sudo k3s kubectl -n golang-be rollout restart deploy/api deploy/worker
@@ -204,16 +204,16 @@ Zero-downtime: API `replicas: 2`, `maxUnavailable: 0`, readiness `/health/ready`
 
 ---
 
-## Teardown (down semua)
+## Teardown (bring everything down)
 
-### Full lab wipe (app + data plane golang-be)
+### Full lab wipe (app + golang-be data plane)
 
 ```bash
 sudo k3s kubectl delete namespace golang-be
 docker compose down -v
 ```
 
-### Cek bersih
+### Verify clean
 
 ```bash
 sudo k3s kubectl get pods -A | grep golang || echo "no golang pods"
@@ -225,7 +225,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://192.168.0.155/health/ready   # e
 
 ## Quick start (local laptop — Compose only)
 
-Untuk develop di mesin lokal tanpa k3s: api+worker ikut Compose.
+For local development without k3s: api+worker run in Compose.
 
 ### 1. Configure
 
@@ -281,7 +281,7 @@ All `/api/v1` routes require `apikey`; protected routes also need `Authorization
 | Method                | Path                                   | Auth                          | Notes                                           |
 | --------------------- | -------------------------------------- | ----------------------------- | ----------------------------------------------- |
 | `GET`                 | `/health/live`                         | —                             | Liveness                                        |
-| `GET`                 | `/health/ready`                        | —                             | Readiness (PG/Redis/Mongo/Typesense)            |
+| `GET`                 | `/health/ready`                        | —                             | Readiness (critical: PG/Redis; optional: Mongo/Typesense) |
 | `GET`                 | `/metrics`                             | —                             | Prometheus (includes `golangbe_outbox_pending`) |
 | `POST`                | `/api/v1/authentication/register`      | apikey                        | Create account (password min 8)                 |
 | `POST`                | `/api/v1/authentication/login`         | apikey                        | Issue tokens                                    |
@@ -336,7 +336,9 @@ scripts/deploy-k3s-lab.sh   single-node: Compose data plane + k3s app
 scripts/load-orders.sh      concurrency / oversell demo
 k8s/ helm/                  deploy
 .gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
-docs/                       OpenAPI, belajar/ (code), PANDUAN (ops), GitLab, public access
+docs/                       OpenAPI, belajar/ (Indonesian code walkthrough), PANDUAN (Indonesian ops), GitLab, public access
+scripts/chaos-verify.sh     Lab failure SLIs (auto-resumes outbox on EXIT)
+scripts/lab-restore.sh      Restore containers / outbox / rate limit after chaos or bench
 test/                       unit / integration / mocks
 ```
 
@@ -397,7 +399,7 @@ See [`docs/GITLAB-SETUP.md`](docs/GITLAB-SETUP.md) and [`.gitlab-ci.yml`](.gitla
 
 The cluster runs only the **stateless app tier** (`api` + `worker`). Data services stay on Docker Compose on the same host.
 
-Day-to-day commands: see **[Lab deploy (Mode A)](#lab-deploy-mode-a--commands)** and **[Teardown](#teardown-down-semua)** above.
+Day-to-day commands: see **[Lab deploy (Mode A)](#lab-deploy-mode-a--commands)** and **[Teardown](#teardown-bring-everything-down)** above.
 
 Public / domain access later: [`docs/PUBLIC-ACCESS.md`](docs/PUBLIC-ACCESS.md).
 
@@ -424,4 +426,4 @@ helm install golang-be ./helm/golang-be -n golang-be --create-namespace \
 - **Config validation at boot** — misconfig fails fast, including production secret / CORS guards
 - **Lab surface** — admin-only and disabled in production
 
-Learning path (Bahasa Indonesia): start at [`docs/belajar/README.md`](docs/belajar/README.md).
+Learning path (Indonesian): start at [`docs/belajar/README.md`](docs/belajar/README.md).
