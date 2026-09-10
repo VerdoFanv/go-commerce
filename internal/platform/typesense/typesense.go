@@ -6,6 +6,7 @@ package typesense
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -110,10 +111,11 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]Product
 		return result, err
 	})
 	if err != nil {
-		if errors.Is(err, gobreaker.ErrOpenState) {
+		// Search is best-effort: open breaker OR transport failure → 503, never 500.
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 			return nil, domain.ErrUnavailable
 		}
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", domain.ErrUnavailable, err)
 	}
 
 	searchRes := res.(*api.SearchResult)

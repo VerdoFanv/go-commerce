@@ -657,7 +657,7 @@ Jangan cuma baca failure-matrix JSON — **matikan** dependency dan catat:
 | Aksi | Expect singkat |
 |------|----------------|
 | `POST /lab/outbox/pause` → order | 201 + pending outbox |
-| Stop Typesense | ready `degraded`; search 503; CRUD OK |
+| Stop Typesense | ready `degraded`; search **503**; CRUD OK |
 | Stop Redis | ready **503** (critical) |
 | Stop Kafka | order 201 + outbox; product event bisa hilang |
 | Delete worker pod | order eventually paid setelah restart |
