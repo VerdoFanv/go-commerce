@@ -99,7 +99,7 @@ HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod \
 
 # After ANY manual stop/start chaos (Typesense/Kafka/Redis/…), always restore:
 HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod \
-  ./scripts/lab-restore.sh
+  SUDO_PASS='…' ./scripts/lab-restore.sh   # SUDO_PASS if k3s kubectl needs sudo
 ```
 
 Or import Postman: [postman/](postman/) → env Lab → folder 5.
