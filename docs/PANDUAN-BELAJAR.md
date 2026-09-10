@@ -101,7 +101,7 @@ Seed lewat migration (jalan otomatis saat API boot):
 **Dummy wishlist (buyer):** Kopi + Matcha  
 
 Setelah deploy image baru / restart API, migration `000003`–`000004` ter-apply.  
-Lalu **reindex Typesense** (index tidak ikut SQL seed):
+API boot **auto-reindex** Typesense jika index kosong (SQL seed tidak menulis Typesense). Manual fallback:
 
 ```bash
 TOKEN=$(curl -s http://192.168.0.155/api/v1/authentication/login \

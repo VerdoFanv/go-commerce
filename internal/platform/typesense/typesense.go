@@ -53,7 +53,23 @@ func Connect(cfg config.Config) (*Client, error) {
 	})
 
 	slog.Info("typesense connected", "addr", cfg.TypesenseAddr)
+
+	// Schema only (fast). Document backfill from Postgres happens in API OnStart
+	// via lab.BootstrapTypesense — SQL seed does not populate Typesense.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := c.BootstrapSchemas(ctx); err != nil {
+		slog.Warn("typesense bootstrap schemas on connect", "err", err)
+	}
+
 	return c, nil
+}
+
+// BootstrapSchemas creates every search collection this process owns (idempotent).
+// When you add a new index (e.g. users), add EnsureXCollection here and IndexX on
+// the write path — do not rely on manual admin reindex for fresh labs.
+func (c *Client) BootstrapSchemas(ctx context.Context) error {
+	return c.EnsureProductsCollection(ctx)
 }
 
 // ProductDocument is the indexed shape (denormalized, search-optimized).
@@ -68,6 +84,9 @@ type ProductDocument struct {
 // IndexProduct upserts one product document. Failures are logged, never fatal:
 // search is a read optimization, Postgres stays the source of truth.
 func (c *Client) IndexProduct(ctx context.Context, p domain.Product) error {
+	if err := c.EnsureProductsCollection(ctx); err != nil {
+		return err
+	}
 	doc := ProductDocument{
 		ID:          strconv.Itoa(int(p.ID)),
 		UserID:      p.UserID,
@@ -100,41 +119,110 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]Product
 		limit = 20
 	}
 
+	docs, err := c.searchOnce(ctx, query, limit)
+	if err == nil {
+		return docs, nil
+	}
+	// Fresh Typesense volume: collection missing → create schema and retry once.
+	if isCollectionMissing(err) {
+		if e := c.EnsureProductsCollection(ctx); e != nil {
+			return nil, fmt.Errorf("%w: %v", domain.ErrUnavailable, e)
+		}
+		docs, err = c.searchOnce(ctx, query, limit)
+		if err == nil {
+			return docs, nil
+		}
+		// Empty collection after ensure → empty hits, not an error.
+		if isCollectionMissing(err) {
+			return []ProductDocument{}, nil
+		}
+	}
+	if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+		return nil, domain.ErrUnavailable
+	}
+	return nil, fmt.Errorf("%w: %v", domain.ErrUnavailable, err)
+}
+
+func (c *Client) searchOnce(ctx context.Context, query string, limit int) ([]ProductDocument, error) {
 	res, err := c.breaker.Execute(func() (any, error) {
 		searchParams := &api.SearchCollectionParams{
 			Q:       pointer.String(query),
 			QueryBy: pointer.String("name,description"),
 			PerPage: pointer.Int(limit),
 		}
-
 		result, err := c.ts.Collection(indexName).Documents().Search(ctx, searchParams)
 		return result, err
 	})
 	if err != nil {
-		// Search is best-effort: open breaker OR transport failure → 503, never 500.
-		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
-			return nil, domain.ErrUnavailable
-		}
-		return nil, fmt.Errorf("%w: %v", domain.ErrUnavailable, err)
+		return nil, err
 	}
 
 	searchRes := res.(*api.SearchResult)
 	var docs []ProductDocument
-	
 	if searchRes != nil && searchRes.Hits != nil {
 		for _, hit := range *searchRes.Hits {
-			if hit.Document != nil {
-				docMap := *hit.Document
-				docs = append(docs, ProductDocument{
-					ID:          docMap["id"].(string),
-					Name:        docMap["name"].(string),
-					Description: docMap["description"].(string),
-					Price:       docMap["price"].(float64), 
-				})
+			if hit.Document == nil {
+				continue
 			}
+			docMap := *hit.Document
+			docs = append(docs, ProductDocument{
+				ID:          asString(docMap["id"]),
+				UserID:      asUint(docMap["userId"]),
+				Name:        asString(docMap["name"]),
+				Description: asString(docMap["description"]),
+				Price:       asFloat(docMap["price"]),
+			})
 		}
 	}
 	return docs, nil
+}
+
+func isCollectionMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "collection not found") ||
+		(strings.Contains(msg, "not found") && strings.Contains(msg, "404"))
+}
+
+func asString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return strconv.FormatInt(int64(t), 10)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func asUint(v any) uint {
+	switch t := v.(type) {
+	case float64:
+		return uint(t)
+	case int:
+		return uint(t)
+	case string:
+		n, _ := strconv.Atoi(t)
+		return uint(n)
+	default:
+		return 0
+	}
+}
+
+func asFloat(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int:
+		return float64(t)
+	case string:
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
+	default:
+		return 0
+	}
 }
 
 func (c *Client) Ping(ctx context.Context) error {

@@ -7,11 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"github.com/verdofanv/golang-be/internal/config"
 	"github.com/verdofanv/golang-be/internal/domain"
 	"github.com/verdofanv/golang-be/internal/http/product"
@@ -19,6 +19,7 @@ import (
 	"github.com/verdofanv/golang-be/internal/platform/outbox"
 	appredis "github.com/verdofanv/golang-be/internal/platform/redis"
 	"github.com/verdofanv/golang-be/internal/platform/typesense"
+	"github.com/verdofanv/golang-be/internal/worker/audit"
 	"gorm.io/gorm"
 )
 
@@ -316,7 +317,7 @@ func (s *Service) TypesenseExplore(ctx context.Context, query string) (*Typesens
 	out := &TypesenseLab{
 		Stats:  stats,
 		Query:  query,
-		Lesson: "Kalau numDocuments=0, jalankan POST /api/v1/lab/typesense/reindex setelah seed/migration.",
+		Lesson: "API boot auto-reindex kalau index kosong. Manual: POST /api/v1/lab/typesense/reindex.",
 	}
 	if query != "" {
 		docs, err := s.search.Search(ctx, query, 10)
@@ -366,6 +367,39 @@ func (s *Service) TypesenseReindex(ctx context.Context) (*ReindexResult, error) 
 		res.Indexed++
 	}
 	return res, nil
+}
+
+// BootstrapTypesense ensures the products schema exists and backfills from
+// Postgres when the index is empty (typical after fresh Typesense volume + SQL seed).
+func (s *Service) BootstrapTypesense(ctx context.Context) error {
+	if s.search == nil {
+		return nil
+	}
+	if err := s.search.EnsureProductsCollection(ctx); err != nil {
+		return err
+	}
+	stats, err := s.search.Stats(ctx)
+	if err != nil {
+		return err
+	}
+	if stats.NumDocuments > 0 {
+		slog.Info("typesense bootstrap skip reindex", "numDocuments", stats.NumDocuments)
+		return nil
+	}
+	var n int64
+	if err := s.db.WithContext(ctx).Model(&product.ProductModel{}).Where("deleted_at IS NULL").Count(&n).Error; err != nil {
+		return err
+	}
+	if n == 0 {
+		slog.Info("typesense bootstrap: no products in postgres yet")
+		return nil
+	}
+	res, err := s.TypesenseReindex(ctx)
+	if err != nil {
+		return err
+	}
+	slog.Info("typesense bootstrap reindexed", "indexed", res.Indexed, "failed", res.Failed)
+	return nil
 }
 
 // FailureMatrix documents expected resilience behaviour for the commerce lab.

@@ -48,7 +48,9 @@ services:
       - typesense_data:/data
     command: "--data-dir /data --api-key=dev-typesense-key"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8108/health || exit 1"]
+      # Typesense image has neither wget nor curl in some tags — TCP check is enough
+      # to know the process accepts connections. App readiness still hits /health.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8108'"]
       interval: 10s
       timeout: 5s
       retries: 12

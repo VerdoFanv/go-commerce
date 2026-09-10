@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -121,6 +122,7 @@ func registerLifecycle(
 	httpServer *http.Server,
 	_ *gin.Engine, // ensure engine is constructed
 	orderSvc *order.Service,
+	labSvc *lab.Service,
 	db *gorm.DB,
 	rdb *appredis.Client,
 	mdb *mongo.Client,
@@ -143,6 +145,15 @@ func registerLifecycle(
 			if err := kafka.EnsureTopics(cfg, cfg.KafkaTopicProducts, cfg.KafkaTopicDLQ); err != nil {
 				slog.Warn("ensure topics failed (broker may still be starting)", "err", err)
 			}
+
+			// After migrate: SQL seed is in Postgres but Typesense starts empty.
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				if err := labSvc.BootstrapTypesense(ctx); err != nil {
+					slog.Warn("typesense bootstrap", "err", err)
+				}
+			}()
 
 			go notifier.Run(notifierCtx)
 			go relay.Run(relayCtx)
