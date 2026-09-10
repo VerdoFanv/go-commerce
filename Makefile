@@ -111,6 +111,13 @@ bench-oversell: ## Contention: N≫S buyers, assert no negative stock
 bench-checkout: ## Sustained POST /orders (raise RATE_LIMIT_MAX first)
 	BASE_URL=$${BASE_URL:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} BENCH_ONLY=checkout ./scripts/bench.sh
 
+.PHONY: chaos lab-restore
+chaos: ## Lab chaos SLIs (auto-resumes outbox on EXIT)
+	HOST=$${HOST:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} ./scripts/chaos-verify.sh
+
+lab-restore: ## Start data-plane deps, resume outbox, reset RATE_LIMIT_MAX
+	HOST=$${HOST:-http://127.0.0.1:8080} API_KEY=$${API_KEY:-dev-api-key} ./scripts/lab-restore.sh
+
 ## ---- Quality ----
 
 .PHONY: vet lint fmt ci

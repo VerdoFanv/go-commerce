@@ -73,6 +73,12 @@ make load-smoke         # alias → smoke (commerce path)
 
 Logs + JSON summary land in `load/results/` (gitignored).
 
+**After bench:** restore normal rate limit / deps:
+
+```bash
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/lab-restore.sh
+```
+
 ### Observability during a run
 
 ```bash

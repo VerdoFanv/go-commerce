@@ -43,7 +43,10 @@ curl -s $HOST/health/ready | jq .
 
 ## Eksperimen wajib (chaos)
 
-Script: `./scripts/chaos-verify.sh` (butuh admin login).
+Script: `./scripts/chaos-verify.sh` (butuh admin login).  
+**Setelah selesai / setelah stop container manual:** `./scripts/lab-restore.sh` (wajib).
+
+`chaos-verify` memasang `trap EXIT` → outbox selalu di-resume meski script gagal di tengah.
 
 ### 1) Outbox pause ≈ Kafka publish stall
 
@@ -121,9 +124,10 @@ Kalau signal tidak bergerak saat chaos — itu bug observability, bukan “siste
 
 - [ ] Jelaskan kenapa Mongo down ≠ API NotReady (tapi audit bisa telat)
 - [ ] Pause outbox → order 201 → resume → paid (bukti sendiri)
-- [ ] Typesense down → degraded + search 503 + create product 201
+- [ ] Typesense down → degraded + search 503 + create product 201 → **`lab-restore.sh`**
 - [ ] Bedakan jalur product (fire-and-forget) vs order (outbox)
 - [ ] Tahu cara baca outbox_pending + mongo events + worker logs
 - [ ] Tahu Postman folder Lab + env lab ([`../postman/`](../postman/))
+- [ ] Lab kembali `message=ready` (bukan degraded) sebelum logout dari sesi belajar
 
 Sebelumnya: [09-commerce-reliability](09-commerce-reliability.md) · Index: [README.md](README.md)

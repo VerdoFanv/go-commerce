@@ -4,7 +4,12 @@
 # Usage:
 #   HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/chaos-verify.sh
 #
+# Always leaves the lab usable: on EXIT it resumes outbox + clears the Redis
+# pause key. For full container restore after manual stop/start chaos, run:
+#   ./scripts/lab-restore.sh
+#
 # Optional: ADMIN_EMAIL ADMIN_PASSWORD BUYER_EMAIL BUYER_PASSWORD PRODUCT_ID
+#           SKIP_RESTORE=1  — disable EXIT cleanup (debug only)
 set -euo pipefail
 
 HOST="${HOST:-http://127.0.0.1:8080}"
@@ -14,17 +19,15 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
 BUYER_EMAIL="${BUYER_EMAIL:-buyer@golang-be.dev}"
 BUYER_PASSWORD="${BUYER_PASSWORD:-user123}"
 PRODUCT_ID="${PRODUCT_ID:-}"
+SKIP_RESTORE="${SKIP_RESTORE:-0}"
 
 HDR=(-H "apikey: ${API_KEY}" -H "Content-Type: application/json")
 pass=0
 fail=0
+ADMIN_TOKEN=""
 
 ok() { echo "  PASS: $*"; pass=$((pass + 1)); }
 bad() { echo "  FAIL: $*"; fail=$((fail + 1)); }
-
-json_field() {
-  python3 -c "import sys,json; d=json.load(sys.stdin); print($1)" 2>/dev/null || true
-}
 
 login() {
   local email="$1" passwd="$2"
@@ -34,6 +37,27 @@ login() {
   echo "$raw" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['tokens']['accessToken'])" 2>/dev/null \
     || { echo "login failed for $email: $raw" >&2; return 1; }
 }
+
+# Never leave outbox paused if this script crashes mid-chaos.
+cleanup_outbox() {
+  [[ "$SKIP_RESTORE" == "1" ]] && return 0
+  echo ""
+  echo "==> cleanup: resume outbox (always)"
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx redis-global; then
+    docker exec redis-global redis-cli DEL outbox:relay:paused >/dev/null 2>&1 || true
+  fi
+  local tok="${ADMIN_TOKEN:-}"
+  if [[ -z "$tok" ]]; then
+    tok=$(login "$ADMIN_EMAIL" "$ADMIN_PASSWORD" 2>/dev/null || true)
+  fi
+  if [[ -n "$tok" ]]; then
+    curl -s -X POST "$HOST/api/v1/lab/outbox/resume" \
+      -H "apikey: ${API_KEY}" -H "Authorization: Bearer $tok" >/dev/null || true
+    curl -s -X POST "$HOST/api/v1/lab/outbox/relay-once" \
+      -H "apikey: ${API_KEY}" -H "Authorization: Bearer $tok" >/dev/null || true
+  fi
+}
+trap cleanup_outbox EXIT
 
 echo "==> ready"
 ready=$(curl -s -w "\n%{http_code}" "$HOST/health/ready")
@@ -56,7 +80,6 @@ fm=$(curl -s -o /tmp/fm.json -w "%{http_code}" "$HOST/api/v1/lab/commerce/failur
 
 if [[ -z "$PRODUCT_ID" ]]; then
   echo "==> ensure product with stock"
-  # seller may be buyer role in seed; create as buyer (RoleUser can create)
   PRODUCT_ID=$(curl -s -X POST "$HOST/api/v1/products" "${BH[@]}" \
     -d '{"name":"Chaos SKU","description":"chaos","price":1000,"stock":20}' \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
@@ -105,4 +128,5 @@ curl -s "$HOST/metrics" | grep -q golangbe_outbox_pending && ok "outbox_pending 
 
 echo ""
 echo "Result: $pass passed, $fail failed"
+echo "Note: EXIT trap resumes outbox. After stopping containers manually, run: ./scripts/lab-restore.sh"
 [[ "$fail" -eq 0 ]]

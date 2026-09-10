@@ -666,6 +666,8 @@ Detail: [`FAILURE-RUNBOOK.md`](FAILURE-RUNBOOK.md) · [`belajar/10-failure-ops.m
 
 ```bash
 HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/chaos-verify.sh
+# selalu akhiri sesi chaos/bench dengan restore:
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/lab-restore.sh
 ```
 
 ---

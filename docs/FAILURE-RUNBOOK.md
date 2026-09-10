@@ -96,6 +96,24 @@ Grafana (optional `make obs-up`): RPS, p95, publish/consume, DLQ, outbox pending
 ```bash
 HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod \
   ./scripts/chaos-verify.sh
+
+# After ANY manual stop/start chaos (Typesense/Kafka/Redis/…), always restore:
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod \
+  ./scripts/lab-restore.sh
 ```
 
 Or import Postman: [postman/](postman/) → env Lab → folder 5.
+
+### Restore checklist (wajib setelah chaos)
+
+| Yang sempat dimatikan / diubah | Restore |
+|--------------------------------|---------|
+| Typesense / Kafka | `docker compose up -d kafka typesense` (atau `./scripts/lab-restore.sh`) |
+| Postgres / Redis / Mongo | `cd ~/projects/infra-db && docker compose up -d` |
+| Outbox pause | `POST /lab/outbox/resume` (+ Redis `DEL outbox:relay:paused`) — `chaos-verify` EXIT trap juga melakukan ini |
+| `RATE_LIMIT_MAX` dinaikkan untuk bench | `lab-restore.sh` mengembalikan ke `100` + rollout api |
+| Typesense index kosong | `POST /lab/typesense/reindex` (admin) |
+| Ready masih `degraded` | tunggu CB half-open (~30s) atau `kubectl -n golang-be rollout restart deploy/api` |
+
+`chaos-verify.sh` **tidak** menghentikan container; ia hanya pause outbox lalu selalu resume di EXIT.  
+Manual chaos (stop container) → **harus** diakhiri dengan `lab-restore.sh`.
