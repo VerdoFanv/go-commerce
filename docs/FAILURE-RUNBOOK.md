@@ -1,7 +1,7 @@
 # Failure & ops runbook
 
 Honest matrix: what dies, what users see, what self-heals, what you must do.
-Paired with lab chaos: `scripts/chaos-verify.sh` and Postman folder **5. Lab / chaos**.
+Paired with lab chaos: **LitmusChaos** (`make chaos` / [`chaos/README.md`](../chaos/README.md)), outbox SLI (`make chaos-outbox`), and Postman folder **5. Lab / chaos**.
 
 Related: [BENCHMARK.md](BENCHMARK.md) · [belajar/10-failure-ops.md](belajar/10-failure-ops.md) · [openapi.yaml](openapi.yaml)
 
@@ -95,8 +95,14 @@ Grafana (optional `make obs-up`): RPS, p95, publish/consume, DLQ, outbox pending
 ## Verify on lab
 
 ```bash
-HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod \
-  ./scripts/chaos-verify.sh
+# One-time: Litmus operator + experiment CR
+SUDO_PASS='…' ./scripts/litmus-install.sh
+
+# Infra chaos (pod-delete api + worker) — LitmusChaos
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make chaos
+
+# App SLI: outbox pause → pending → resume
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make chaos-outbox
 
 # After ANY manual stop/start chaos (Typesense/Kafka/Redis/…), always restore:
 HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod \
@@ -111,10 +117,12 @@ Or import Postman: [postman/](postman/) → env Lab → folder 5.
 |--------------------------------|---------|
 | Typesense / Kafka | `docker compose up -d kafka typesense` (atau `./scripts/lab-restore.sh`) |
 | Postgres / Redis / Mongo | `cd ~/projects/infra-db && docker compose up -d` |
-| Outbox pause | `POST /lab/outbox/resume` (+ Redis `DEL outbox:relay:paused`) — `chaos-verify` EXIT trap juga melakukan ini |
+| Outbox pause | `POST /lab/outbox/resume` (+ Redis `DEL outbox:relay:paused`) — `chaos-outbox` EXIT trap juga melakukan ini |
+| Litmus ChaosEngine leftover | `kubectl -n golang-be delete chaosengine --all` (runner cleans on EXIT by default) |
 | `RATE_LIMIT_MAX` dinaikkan untuk bench | `lab-restore.sh` mengembalikan ke `100` + rollout api |
 | Typesense index kosong | `POST /lab/typesense/reindex` (admin) |
 | Ready masih `degraded` | tunggu CB half-open (~30s) atau `kubectl -n golang-be rollout restart deploy/api` |
 
-`chaos-verify.sh` **tidak** menghentikan container; ia hanya pause outbox lalu selalu resume di EXIT.  
+`make chaos` (Litmus) kills pods via ChaosEngine; Deployments recreate them.  
+`make chaos-outbox` **tidak** menghentikan container; ia hanya pause outbox lalu selalu resume di EXIT.  
 Manual chaos (stop container) → **harus** diakhiri dengan `lab-restore.sh`.

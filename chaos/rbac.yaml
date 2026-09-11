@@ -1,0 +1,49 @@
+# ServiceAccount used by Litmus experiment pods in the app namespace.
+# Applied by scripts/litmus-install.sh into namespace golang-be.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litmus-admin
+  namespace: golang-be
+  labels:
+    app.kubernetes.io/name: golang-be
+    app.kubernetes.io/component: chaos
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: litmus-admin
+  namespace: golang-be
+  labels:
+    app.kubernetes.io/name: golang-be
+    app.kubernetes.io/component: chaos
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "events", "configmaps", "services", "replicationcontrollers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "list", "get", "delete", "deletecollection"]
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosengines", "chaosexperiments", "chaosresults"]
+    verbs: ["create", "list", "get", "patch", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: litmus-admin
+  namespace: golang-be
+  labels:
+    app.kubernetes.io/name: golang-be
+    app.kubernetes.io/component: chaos
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: litmus-admin
+subjects:
+  - kind: ServiceAccount
+    name: litmus-admin
+    namespace: golang-be

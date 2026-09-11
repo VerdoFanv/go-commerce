@@ -128,12 +128,11 @@ curl -s -X POST $HOST/api/v1/lab/outbox/relay-once -H "$APIKEY" -H "Authorizatio
 ## Load / concurrency
 
 ```bash
-chmod +x scripts/load-orders.sh scripts/bench.sh scripts/chaos-verify.sh
-API=... API_KEY=... TOKEN=... PRODUCT_ID=1 N=20 ./scripts/load-orders.sh
-# Pastikan stock produk tidak negatif di Postgres
-
-HOST=http://192.168.0.155 API_KEY=... ./scripts/bench.sh      # capacity matrix
-HOST=... API_KEY=... ./scripts/chaos-verify.sh                 # failure claims
+chmod +x scripts/bench.sh scripts/litmus-run.sh scripts/chaos-outbox.sh
+# Prefer k6 matrix (oversell + checkout), not bash:
+HOST=http://192.168.0.155 API_KEY=... ./scripts/bench.sh      # capacity matrix (Grafana k6)
+HOST=... API_KEY=... make chaos                               # Litmus pod-delete
+HOST=... API_KEY=... make chaos-outbox                        # outbox dual-write SLI
 ```
 
 Capacity: [`../BENCHMARK.md`](../BENCHMARK.md) · Failure: [`../FAILURE-RUNBOOK.md`](../FAILURE-RUNBOOK.md) · Modul: [10-failure-ops.md](10-failure-ops.md)

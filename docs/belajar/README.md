@@ -47,7 +47,7 @@ Ops / deploy / API clients:
 2. Trace **siapa memanggil siapa** (handler → service → repo / platform).
 3. Bandingkan dua jalur publish: `product.publishAsync` vs `outbox.Relay`.
 4. Praktek lab: `POST /orders` → pause outbox → pending → resume → worker `paid`.
-5. Jalankan chaos: `HOST=... API_KEY=... ./scripts/chaos-verify.sh`.
+5. Jalankan chaos: `HOST=... API_KEY=... make chaos` (Litmus) dan/atau `make chaos-outbox`.
 
 ```bash
 go test ./test/unit/order/ ./test/unit/domain/ ./test/integration/ -run Order -count=1

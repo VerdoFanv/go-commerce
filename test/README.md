@@ -13,6 +13,7 @@ Struktur ini setara folder `test` + Jest di Express, disesuaikan konvensi Go ent
 | `supertest` API tests | `test/integration/` + `httptest` |
 | `npm test` | `make test` |
 | load / k6 | `load/` + `scripts/bench.sh` |
+| chaos / Litmus | `chaos/` + `scripts/litmus-run.sh` |
 
 ## Layout
 
@@ -28,6 +29,7 @@ load/                # k6 scenarios against a LIVE stack (capacity SLIs)
   helpers.js
   smoke.js | oversell.js | mixed.js | checkout.js | ratelimit.js
 scripts/bench.sh     # matrix runner → load/results/
+chaos/               # LitmusChaos (pod-delete) — see chaos/README.md
 docs/BENCHMARK.md    # what we measure + how to read numbers
 ```
 
@@ -41,9 +43,15 @@ make test-race
 make test-cover
 
 # Live stack required:
+make k6-validate       # parse load/*.js (Docker)
 make bench             # full commerce matrix
 make bench-smoke
 make bench-oversell
+
+# k3s lab:
+make litmus-install    # once
+make chaos             # Litmus pod-delete
+make chaos-outbox      # outbox dual-write HTTP SLI
 ```
 
 ## Aturan

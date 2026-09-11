@@ -1,0 +1,50 @@
+# Kill the worker pod; Deployment must recreate it (orders may stall briefly).
+# Probe only asserts the API stays ready while the worker is disrupted.
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: worker-pod-delete
+  namespace: golang-be
+  labels:
+    app.kubernetes.io/name: golang-be
+    app.kubernetes.io/component: chaos
+spec:
+  engineState: active
+  annotationCheck: "false"
+  jobCleanUpPolicy: delete
+  chaosServiceAccount: litmus-admin
+  appinfo:
+    appns: golang-be
+    applabel: app=worker
+    appkind: deployment
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: "20"
+            - name: CHAOS_INTERVAL
+              value: "10"
+            - name: FORCE
+              value: "true"
+            - name: PODS_AFFECTED_PERC
+              value: "100"
+        probe:
+          - name: api-still-ready
+            type: httpProbe
+            mode: Continuous
+            httpProbe/inputs:
+              url: http://api.golang-be.svc.cluster.local/health/ready
+              insecureSkipVerify: false
+              method:
+                get:
+                  criteria: ==
+                  responseCode: "200"
+            runProperties:
+              probeTimeout: 5s
+              interval: 3s
+              retry: 5
+              probePollingInterval: 2s
+              initialDelay: 2s
+              stopOnFailure: false

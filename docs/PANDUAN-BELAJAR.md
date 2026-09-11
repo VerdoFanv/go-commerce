@@ -633,7 +633,7 @@ docker inspect golang-be-kafka-1 --format '{{.State.Status}} {{.State.ExitCode}}
 | 10 | Failure | Stop Typesense/Kafka, catat perilaku API |
 | 11 | k3s ops | Rollout restart + baca events |
 | 12 | Obs | 1 panel Grafana yang kamu jelaskan |
-| 13 | Chaos script | `./scripts/chaos-verify.sh` hijau |
+| 13 | Chaos Litmus | `make litmus-install` sekali, lalu `make chaos` hijau |
 | 14 | Postman | Import collection + env lab, happy path end-to-end |
 
 ---
@@ -665,7 +665,9 @@ Jangan cuma baca failure-matrix JSON — **matikan** dependency dan catat:
 Detail: [`FAILURE-RUNBOOK.md`](FAILURE-RUNBOOK.md) · [`belajar/10-failure-ops.md`](belajar/10-failure-ops.md)
 
 ```bash
-HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/chaos-verify.sh
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make chaos
+# outbox dual-write (HTTP):
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make chaos-outbox
 # selalu akhiri sesi chaos/bench dengan restore:
 HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod ./scripts/lab-restore.sh
 ```

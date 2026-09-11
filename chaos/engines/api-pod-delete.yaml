@@ -1,0 +1,51 @@
+# Kill one API pod; remaining replica should keep Serving.
+# HTTP continuous probe hits in-cluster Service during chaos.
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: api-pod-delete
+  namespace: golang-be
+  labels:
+    app.kubernetes.io/name: golang-be
+    app.kubernetes.io/component: chaos
+spec:
+  engineState: active
+  annotationCheck: "false"
+  jobCleanUpPolicy: delete
+  chaosServiceAccount: litmus-admin
+  appinfo:
+    appns: golang-be
+    applabel: app=api
+    appkind: deployment
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: "30"
+            - name: CHAOS_INTERVAL
+              value: "10"
+            - name: FORCE
+              value: "false"
+            # With api replicas=2, 50% ≈ one pod.
+            - name: PODS_AFFECTED_PERC
+              value: "50"
+        probe:
+          - name: api-ready
+            type: httpProbe
+            mode: Continuous
+            httpProbe/inputs:
+              url: http://api.golang-be.svc.cluster.local/health/ready
+              insecureSkipVerify: false
+              method:
+                get:
+                  criteria: ==
+                  responseCode: "200"
+            runProperties:
+              probeTimeout: 5s
+              interval: 3s
+              retry: 5
+              probePollingInterval: 2s
+              initialDelay: 2s
+              stopOnFailure: false

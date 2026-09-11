@@ -42,10 +42,12 @@ Legacy: `scripts/load-orders.sh` — bash oversell with **hard assert** (same SL
 ### Prereqs
 
 - API ready: `curl -s $BASE_URL/health/ready` → 200
-- Docker available (k6 runs in `grafana/k6:0.54.0`)
+- Docker available (Grafana k6 runs in `grafana/k6:0.54.0`)
+- Optional syntax gate (no API): `make k6-validate`
 - For **D (checkout)**: temporarily raise API `RATE_LIMIT_MAX` (e.g. `10000`) or you measure the limiter, not Postgres. Restore after.
   - Default k6 threshold is **p95 &lt; 800ms** (honest for a single-node APU lab). Set `BENCH_ORDER_P95=500` if you want the stricter portfolio SLI.
 - For **E (ratelimit)**: keep a **low** `RATE_LIMIT_MAX` (e.g. `30` / `1m`) so 429s appear quickly.
+- Infra chaos is **Litmus**, not k6 — see [`chaos/README.md`](../chaos/README.md).
 
 ### One command
 

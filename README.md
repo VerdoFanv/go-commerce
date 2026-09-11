@@ -333,11 +333,14 @@ internal/
 
 migrations/                 000001…000007 (commerce + inbox composite PK)
 scripts/deploy-k3s-lab.sh   single-node: Compose data plane + k3s app
-scripts/load-orders.sh      concurrency / oversell demo
+scripts/load-orders.sh      Legacy bash oversell (prefer make bench-oversell / k6)
 k8s/ helm/                  deploy
+chaos/                      LitmusChaos engines (pod-delete api/worker)
 .gitlab-ci.yml              GitLab CI (self-deploy or pipeline)
 docs/                       OpenAPI, belajar/ (Indonesian code walkthrough), PANDUAN (Indonesian ops), GitLab, public access
-scripts/chaos-verify.sh     Lab failure SLIs (auto-resumes outbox on EXIT)
+scripts/litmus-install.sh   Install Litmus operator + experiment (once)
+scripts/litmus-run.sh       Run LitmusChaos engines (make chaos)
+scripts/chaos-outbox.sh     App outbox dual-write SLI (make chaos-outbox)
 scripts/lab-restore.sh      Restore containers / outbox / rate limit after chaos or bench
 test/                       unit / integration / mocks
 ```
@@ -356,27 +359,40 @@ make ci                 # local CI-equivalent checks
 
 ---
 
-## Load testing
+## Load testing (Grafana k6)
 
 Capacity evidence lives in [`docs/BENCHMARK.md`](docs/BENCHMARK.md) — not in feature bullets.
-Failure / self-heal evidence: [`docs/FAILURE-RUNBOOK.md`](docs/FAILURE-RUNBOOK.md) + `./scripts/chaos-verify.sh`.
+Infra chaos: **LitmusChaos** — [`chaos/README.md`](chaos/README.md) + `make chaos`.
+Outbox dual-write SLI: `make chaos-outbox`.
 
 ```bash
+# Syntax check (Docker; no live API):
+make k6-validate
+
 # API must be up. Lab example:
 BASE_URL=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make bench
 
 make bench-smoke      # health + order path
 make bench-oversell   # N≫S race, stock never < 0
 make bench-checkout   # sustained POST /orders (raise RATE_LIMIT_MAX first)
+```
 
-# Legacy bash oversell with hard assert:
-API=... API_KEY=... TOKEN=... SELLER_TOKEN=... PRODUCT_ID=1 N=40 ./scripts/load-orders.sh
+## Chaos testing (LitmusChaos)
+
+```bash
+# Once on the k3s lab box:
+SUDO_PASS='…' make litmus-install
+
+HOST=http://192.168.0.155 API_KEY=lab-api-key-change-in-prod make chaos
+make chaos-api        # pod-delete on api only
+make chaos-outbox     # HTTP outbox pause/resume SLI
 ```
 
 | Layer | Proves |
 | ----- | ------ |
 | `test/unit` + `test/integration` | Logic & HTTP wiring (mocks / in-memory) |
-| `load/*` + `scripts/bench.sh` | Live SLIs: oversell, checkout latency, rate limit, mixed traffic |
+| `load/*` + `scripts/bench.sh` (k6) | Live SLIs: oversell, checkout latency, rate limit, mixed traffic |
+| `chaos/` + Litmus | Pod kill resilience (api/worker) + ready probes |
 
 Results → `load/results/` (gitignored). Paste a row into the table in `docs/BENCHMARK.md` after each honest run.
 

@@ -43,10 +43,12 @@ curl -s $HOST/health/ready | jq .
 
 ## Eksperimen wajib (chaos)
 
-Script: `./scripts/chaos-verify.sh` (butuh admin login).  
+**Infra (LitmusChaos):** `make litmus-install` sekali di lab k3s, lalu `make chaos` (pod-delete api/worker). Detail: [`chaos/README.md`](../../chaos/README.md).
+
+**App SLI (outbox):** `./scripts/chaos-outbox.sh` / `make chaos-outbox` (butuh admin login).  
 **Setelah selesai / setelah stop container manual:** `./scripts/lab-restore.sh` (wajib).
 
-`chaos-verify` memasang `trap EXIT` → outbox selalu di-resume meski script gagal di tengah.
+`chaos-outbox` memasang `trap EXIT` → outbox selalu di-resume meski script gagal di tengah.
 
 ### 1) Outbox pause ≈ Kafka publish stall
 
